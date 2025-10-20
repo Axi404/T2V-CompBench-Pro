@@ -16,6 +16,13 @@ from .utils.llava_utils import (
     process_images,
     tokenizer_image_token,
 )
+from .utils.prompt_utils import (
+    INTERACTION_PROMPT_TEMPLATE_Q1 as Q1_template,
+    INTERACTION_PROMPT_TEMPLATE_Q2 as Q2_template,
+    INTERACTION_PROMPT_TEMPLATE_Q3_A as Q3_A_template,
+    INTERACTION_PROMPT_TEMPLATE_Q3_B as Q3_B_template,
+    INTERACTION_PROMPT_TEMPLATE_Q3_C as Q3_C_template,
+)
 from .utils.utils import (
     extract_json,
     initialize_csv,
@@ -24,17 +31,9 @@ from .utils.utils import (
     write_to_csv,
 )
 from .utils.video_utils import convert_video_to_grid
-from .utils.prompt_utils import (
-    INTERACTION_PROMPT_TEMPLATE_Q1 as Q1_template,
-    INTERACTION_PROMPT_TEMPLATE_Q2 as Q2_template,
-    INTERACTION_PROMPT_TEMPLATE_Q3_A as Q3_A_template,
-    INTERACTION_PROMPT_TEMPLATE_Q3_B as Q3_B_template,
-    INTERACTION_PROMPT_TEMPLATE_Q3_C as Q3_C_template,
-)
 
 
 def eval_model(args):
-
     # preprocess: video 2 grid
     image_grid_path = args.image_grid_path
     if image_grid_path == None:
@@ -45,7 +44,7 @@ def eval_model(args):
     disable_torch_init()
 
     model_name = get_model_name_from_path(args.model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(
+    tokenizer, model, image_processor, _ = load_pretrained_model(
         args.model_path, args.model_base, model_name
     )
     with open(args.read_prompt_file, "r") as json_data:

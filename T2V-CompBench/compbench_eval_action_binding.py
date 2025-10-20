@@ -17,6 +17,13 @@ from .utils.llava_utils import (
     process_images,
     tokenizer_image_token,
 )
+from .utils.prompt_utils import (
+    ACTION_BINDING_PROMPT_TEMPLATE_Q1 as Q1_template,
+    ACTION_BINDING_PROMPT_TEMPLATE_Q2 as Q2_template,
+    ACTION_BINDING_PROMPT_TEMPLATE_Q3_A as Q3_A_template,
+    ACTION_BINDING_PROMPT_TEMPLATE_Q3_BC_OBJ1 as Q3_BC_obj1_template,
+    ACTION_BINDING_PROMPT_TEMPLATE_Q3_BC_OBJ2 as Q3_BC_obj2_template,
+)
 from .utils.utils import (
     extract_json,
     initialize_csv,
@@ -25,13 +32,6 @@ from .utils.utils import (
     write_to_csv,
 )
 from .utils.video_utils import convert_video_to_grid
-from .utils.prompt_utils import (
-    ACTION_BINDING_PROMPT_TEMPLATE_Q1 as Q1_template,
-    ACTION_BINDING_PROMPT_TEMPLATE_Q2 as Q2_template,
-    ACTION_BINDING_PROMPT_TEMPLATE_Q3_A as Q3_A_template,
-    ACTION_BINDING_PROMPT_TEMPLATE_Q3_BC_OBJ1 as Q3_BC_obj1_template,
-    ACTION_BINDING_PROMPT_TEMPLATE_Q3_BC_OBJ2 as Q3_BC_obj2_template,
-)
 
 
 def eval_model(args):

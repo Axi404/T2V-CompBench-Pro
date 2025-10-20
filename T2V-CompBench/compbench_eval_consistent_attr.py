@@ -12,12 +12,15 @@ from .utils.image_utils import load_images
 from .utils.llava_utils import (
     IMAGE_TOKEN_INDEX,
     DEFAULT_IMAGE_TOKEN,
-    DEFAULT_IM_START_TOKEN,
-    DEFAULT_IM_END_TOKEN,
     disable_torch_init,
     get_model_name_from_path,
     process_images,
     tokenizer_image_token,
+)
+from .utils.prompt_utils import (
+    CONSISTENT_ATTR_PROMPT_TEMPLATE_Q1 as Q1_template,
+    CONSISTENT_ATTR_PROMPT_TEMPLATE_Q2 as Q2_template,
+    CONSISTENT_ATTR_PROMPT_TEMPLATE_Q3 as Q3_template,
 )
 from .utils.utils import (
     extract_json,
@@ -27,11 +30,6 @@ from .utils.utils import (
     write_to_csv,
 )
 from .utils.video_utils import convert_video_to_grid
-from .utils.prompt_utils import (
-    CONSISTENT_ATTR_PROMPT_TEMPLATE_Q1 as Q1_template,
-    CONSISTENT_ATTR_PROMPT_TEMPLATE_Q2 as Q2_template,
-    CONSISTENT_ATTR_PROMPT_TEMPLATE_Q3 as Q3_template,
-)
 
 
 def eval_model(args):

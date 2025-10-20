@@ -1,15 +1,13 @@
 import argparse
-import torch
 import json
 import os
 import re
 
+import torch
+
 from ..LLaVA.llava.model.builder import load_pretrained_model
 
-import re
-
 from .utils.conversation_utils import conv_templates
-from .utils.video_utils import convert_video_to_frames
 from .utils.image_utils import load_images
 from .utils.llava_utils import (
     DEFAULT_IMAGE_TOKEN,
@@ -19,12 +17,13 @@ from .utils.llava_utils import (
     process_images,
     tokenizer_image_token,
 )
-from .utils.utils import set_seed, initialize_csv, write_to_csv, model_score
 from .utils.prompt_utils import (
     DYNAMIC_ATTR_PROMPT_TEMPLATE_Q1 as Q1_template,
     DYNAMIC_ATTR_PROMPT_TEMPLATE_Q2 as Q2_template,
     DYNAMIC_ATTR_PROMPT_TEMPLATE_Q3 as Q3_template,
 )
+from .utils.utils import set_seed, initialize_csv, write_to_csv, model_score
+from .utils.video_utils import convert_video_to_frames
 
 
 def eval_model(args):
@@ -36,7 +35,7 @@ def eval_model(args):
     # Model
     disable_torch_init()
     model_name = get_model_name_from_path(args.model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(
+    tokenizer, model, image_processor, _ = load_pretrained_model(
         args.model_path, args.model_base, model_name
     )
     with open(args.read_prompt_file, "r") as json_data:
@@ -64,7 +63,6 @@ def eval_model(args):
 
         state_0 = prompts[num]["state 0"]
         state_1 = prompts[num]["state 1"]
-        phrases = [state_0, state_1]
         Q1 = DEFAULT_IMAGE_TOKEN + "\n" + Q1_template
 
         image_files = os.path.join(frame_folder, frame_images[i])
