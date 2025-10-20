@@ -37,9 +37,9 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def initialize_csv(output_path: str, t2v_model: str):
+def initialize_csv(output_path: str, t2v_model: str, benchmark_name: str):
     os.makedirs(output_path, exist_ok=True)
-    csv_path = os.path.join(output_path, f"{t2v_model}_action_binding_score.csv")
+    csv_path = os.path.join(output_path, f"{t2v_model}_{benchmark_name}_score.csv")
 
     if os.path.exists(csv_path):
         with open(csv_path, "r", newline="") as csvreader:
@@ -53,30 +53,84 @@ def initialize_csv(output_path: str, t2v_model: str):
         csvfile = open(csv_path, "a", newline="")
         try:
             csv_writer = csv.writer(csvfile)
-            csv_writer.writerow(
-                [
+            if benchmark_name == "dynamic_attr":
+                csv_writer.writerow(
                     "name",
                     "prompt",
-                    "seed0_answer1",
-                    "seed0_answer2",
-                    "seed0_answer3",
-                    "seed0_score",
-                    "seed1_answer1",
-                    "seed1_answer2",
-                    "seed1_answer3",
-                    "seed1_score",
-                    "seed2_answer1",
-                    "seed2_answer2",
-                    "seed2_answer3",
-                    "seed2_score",
-                    "seed_score",
+                    "1_answer1",
+                    "1_answer2",
+                    "2_answer3",
+                    "2_answer1",
+                    "2_answer2",
+                    "2_answer3",
+                    "inter_answers",
+                    "score_1",
+                    "score_1_1",
+                    "score_2",
+                    "score_2_1",
+                    "flag",
                     "Score",
-                ]
-            )
+                )
+            else:
+                csv_writer.writerow(
+                    [
+                        "name",
+                        "prompt",
+                        "seed0_answer1",
+                        "seed0_answer2",
+                        "seed0_answer3",
+                        "seed0_score",
+                        "seed1_answer1",
+                        "seed1_answer2",
+                        "seed1_answer3",
+                        "seed1_score",
+                        "seed2_answer1",
+                        "seed2_answer2",
+                        "seed2_answer3",
+                        "seed2_score",
+                        "seed_score",
+                        "Score",
+                    ]
+                )
         finally:
             csvfile.close()
 
     return csv_path, line_count
+
+
+def write_to_csv(
+    csv_path,
+    benchmark_name,
+    **kwargs,
+):
+    csvfile = open(csv_path, "a", newline="")
+    try:
+        csv_writer = csv.writer(csvfile)
+        if benchmark_name == "dynamic_attr":
+            pass
+        else:
+            csv_writer.writerow(
+                [
+                    kwargs["grid_image_name"],
+                    kwargs["this_prompt"],
+                    kwargs["outputs_1"][0],
+                    kwargs["outputs_1"][1],
+                    kwargs["outputs_1"][2],
+                    kwargs["scores_tmp"][0],
+                    kwargs["outputs_2"][0],
+                    kwargs["outputs_2"][1],
+                    kwargs["outputs_2"][2],
+                    kwargs["scores_tmp"][1],
+                    kwargs["outputs_3"][0],
+                    kwargs["outputs_3"][1],
+                    kwargs["outputs_3"][2],
+                    kwargs["scores_tmp"][2],
+                    kwargs["score_avg"],
+                ]
+            )
+        csvfile.flush()
+    finally:
+        csvfile.close()
 
 
 def model_score(csv_path):

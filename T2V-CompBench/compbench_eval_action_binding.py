@@ -17,7 +17,13 @@ from .utils.llava_utils import (
     process_images,
     tokenizer_image_token,
 )
-from .utils.utils import extract_json, set_seed, initialize_csv, model_score
+from .utils.utils import (
+    extract_json,
+    initialize_csv,
+    model_score,
+    set_seed,
+    write_to_csv,
+)
 from .utils.video_utils import convert_video_to_grid
 from .utils.prompt_utils import (
     ACTION_BINDING_PROMPT_TEMPLATE_Q1 as Q1_template,
@@ -44,7 +50,9 @@ def eval_model(args):
     with open(args.read_prompt_file, "r") as json_data:
         prompts = json.load(json_data)
 
-    csv_path, line_count = initialize_csv(args.output_path, args.t2v_model)
+    csv_path, line_count = initialize_csv(
+        args.output_path, args.t2v_model, "action_binding"
+    )
 
     grid_images = [f for f in os.listdir(image_grid_path) if f[0].isdigit()]
     grid_images = sorted(grid_images)
@@ -175,6 +183,7 @@ def eval_model(args):
                 score_tmp = "bad reply"
             if not ask_Q3:
                 scores_tmp.append(score_tmp)
+                outputs_3.append("")
                 print("score for", grid_images[i], score_tmp)
                 continue
 
@@ -249,33 +258,17 @@ def eval_model(args):
             score_avg = sum(scores_tmp) / len(scores_tmp)
 
         # write to csv
-        csvfile = open(csv_path, "a", newline="")
-        try:
-            csv_writer = csv.writer(csvfile)
-            # TODO: maybe len(outputs_3) < 3?
-            csv_writer.writerow(
-                [
-                    grid_image_name,
-                    this_prompt,
-                    outputs_1[0],
-                    outputs_2[0],
-                    outputs_3[0],
-                    scores_tmp[0],
-                    outputs_1[1],
-                    outputs_2[1],
-                    outputs_3[1],
-                    scores_tmp[1],
-                    outputs_1[2],
-                    outputs_2[2],
-                    outputs_3[2],
-                    scores_tmp[2],
-                    scores_tmp,
-                    score_avg,
-                ]
-            )
-            csvfile.flush()
-        finally:
-            csvfile.close()
+        write_to_csv(
+            csv_path,
+            benchmark_name="action_binding",
+            grid_image_name=grid_image_name,
+            this_prompt=this_prompt,
+            outputs_1=outputs_1,
+            outputs_2=outputs_2,
+            outputs_3=outputs_3,
+            scores_tmp=scores_tmp,
+            score_avg=score_avg,
+        )
 
     return csv_path
 
