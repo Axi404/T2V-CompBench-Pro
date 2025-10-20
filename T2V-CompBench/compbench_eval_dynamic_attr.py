@@ -1,6 +1,5 @@
 import argparse
 import torch
-import csv
 import json
 import os
 import re
@@ -8,22 +7,24 @@ import re
 from ..LLaVA.llava.model.builder import load_pretrained_model
 
 import re
-import numpy as np
 
 from .utils.conversation_utils import conv_templates
 from .utils.video_utils import convert_video_to_frames
 from .utils.image_utils import load_images
 from .utils.llava_utils import (
     DEFAULT_IMAGE_TOKEN,
-    DEFAULT_IM_START_TOKEN,
-    DEFAULT_IM_END_TOKEN,
     IMAGE_TOKEN_INDEX,
     disable_torch_init,
     get_model_name_from_path,
     process_images,
     tokenizer_image_token,
 )
-from .utils.utils import extract_json, set_seed, initialize_csv
+from .utils.utils import set_seed, initialize_csv, write_to_csv, model_score
+from .utils.prompt_utils import (
+    DYNAMIC_ATTR_PROMPT_TEMPLATE_Q1 as Q1_template,
+    DYNAMIC_ATTR_PROMPT_TEMPLATE_Q2 as Q2_template,
+    DYNAMIC_ATTR_PROMPT_TEMPLATE_Q3 as Q3_template,
+)
 
 
 def eval_model(args):
@@ -34,12 +35,10 @@ def eval_model(args):
 
     # Model
     disable_torch_init()
-
     model_name = get_model_name_from_path(args.model_path)
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         args.model_path, args.model_base, model_name
     )
-
     with open(args.read_prompt_file, "r") as json_data:
         prompts = json.load(json_data)
 
@@ -47,17 +46,15 @@ def eval_model(args):
         args.output_path, args.t2v_model, "dynamic_attr"
     )
 
-    initial = "Describe the provided image within 50 words, highlight the visual attributes and states of all the objects that appear in the image."
-
     frame_images = [f for f in os.listdir(frame_folder) if f[0].isdigit()]
     frame_images = sorted(frame_images)
+    print("[INFO] number of images: ", len(frame_images))
 
     evaluated = max(line_count - 1, 0)
 
     for i in range(evaluated, len(frame_images)):
         out = []
         inter_answers = []
-        question = []
         frame_image_name = frame_images[i]
         score = []
         score_total = 0
@@ -65,18 +62,19 @@ def eval_model(args):
         num = int(frame_image_name) - 1
         this_prompt = prompts[num]["prompt"]
 
-        phrase_0 = prompts[num]["state 0"]  # get initial state
-        phrase_1 = prompts[num]["state 1"]  # get end state
+        state_0 = prompts[num]["state 0"]
+        state_1 = prompts[num]["state 1"]
+        phrases = [state_0, state_1]
+        Q1 = DEFAULT_IMAGE_TOKEN + "\n" + Q1_template
+
         image_files = os.path.join(frame_folder, frame_images[i])
         image_files = os.listdir(image_files)
-
         if len(image_files) == 0:
             print(f"no image found for {frame_images[i]}")
             continue
-
         image_files.sort()
-        phrases = [phrase_0, phrase_1]
 
+        # conversation for initial and end images
         for j in range(2):
             set_seed(args.seed)
             if j == 0:
@@ -92,28 +90,20 @@ def eval_model(args):
                 model.device, dtype=torch.float16
             )
 
-            image_token_se = (
-                DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
-            )
-            qs = initial
-            qs = DEFAULT_IMAGE_TOKEN + "\n" + qs
+            # conversation 1
             conv = conv_templates["chatml_direct"].copy()
-
-            conv.append_message(conv.roles[0], qs)
+            conv.append_message(conv.roles[0], Q1)
             conv.append_message(conv.roles[1], None)
-            prompt = conv.get_prompt()
-
-            input_ids = (
-                tokenizer_image_token(
-                    prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
-                )
-                .unsqueeze(0)
-                .cuda()
-            )
-
             with torch.inference_mode():
                 output_ids = model.generate(
-                    input_ids,
+                    tokenizer_image_token(
+                        conv.get_prompt(),
+                        tokenizer,
+                        IMAGE_TOKEN_INDEX,
+                        return_tensors="pt",
+                    )
+                    .unsqueeze(0)
+                    .cuda(),
                     images=images_tensor,
                     image_sizes=image_sizes,
                     do_sample=True if args.temperature > 0 else False,
@@ -123,7 +113,6 @@ def eval_model(args):
                     max_new_tokens=args.max_new_tokens,  # 512
                     use_cache=True,
                 )
-
             outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
                 0
             ].strip()
@@ -134,35 +123,21 @@ def eval_model(args):
             conv.append_message(conv.roles[1], None)
 
             for k in range(2):
-                image_token_se = (
-                    DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
+                # conversation 2
+                Q2 = Q2_template.format(
+                    question_group_tmp=state_0 if k == 0 else state_1
                 )
-                question_group_tmp = phrases[(k) % 2]
-                qs = f"According to the image and your previous answer, evaluate if this prompt '{question_group_tmp}' is correctly described in the image. \
-Select the most suitable score from A to D according the criteria: \n \
-A: Object(s) specified in the prompt are clearly visible, and their visual attributes or states indicated by the prompt are accurately depicted in the image. \n \
-B: Object(s) in the prompt are present, but their visual attributes or states are a little different from the prompt. \n \
-C: Object(s)' attributes or states are significantly different from the prompt.  \n \
-D: Object(s)' attributes or states are totally different from the prompt or the image does not match the prompt at all.\n \
-Provide your analysis and explanation in JSON format with the following keys: score \
-(e.g., C), explanation (within 50 words)."
-
-                question.append(qs)
-                conv.messages[-2][-1] = qs
-
-                prompt = conv.get_prompt()
-
-                input_ids = (
-                    tokenizer_image_token(
-                        prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
-                    )
-                    .unsqueeze(0)
-                    .cuda()
-                )
-
+                conv.messages[-2][-1] = Q2
                 with torch.inference_mode():
                     output_ids = model.generate(
-                        input_ids,
+                        tokenizer_image_token(
+                            conv.get_prompt(),
+                            tokenizer,
+                            IMAGE_TOKEN_INDEX,
+                            return_tensors="pt",
+                        )
+                        .unsqueeze(0)
+                        .cuda(),
                         images=images_tensor,
                         image_sizes=image_sizes,
                         do_sample=True if args.temperature > 0 else False,
@@ -172,26 +147,19 @@ Provide your analysis and explanation in JSON format with the following keys: sc
                         max_new_tokens=args.max_new_tokens,
                         use_cache=True,
                     )
-
                 outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
                     0
                 ].strip()
-                out.append(
-                    outputs
-                )  # out[1]: 1_answer2, out[2]: 1_answer3, out[4]: 2_answer2, out[5]: 2_answer3,
+                out.append(outputs)
 
                 # get score from outputs
-                print(outputs)
                 pattern = r'"score":\s*"([A-D])"'
                 match = re.search(pattern, outputs)
-
                 if match:
                     score_tmp = match.group(1)
-
                 else:
                     score_tmp = "bad reply"
                     print("No score found")
-
                 if score_tmp == "A":
                     score_tmp = 1.0
                 elif score_tmp == "B":
@@ -200,195 +168,145 @@ Provide your analysis and explanation in JSON format with the following keys: sc
                     score_tmp = 0.2
                 elif score_tmp == "D":
                     score_tmp = 0.0
-
                 score.append(score_tmp)
 
-        score_1 = score[0]
+        score_1_0 = score[0]
         score_1_1 = score[1]
-        score_2 = score[2]
+        score_2_0 = score[2]
         score_2_1 = score[3]
 
         try:
-            first_frame_score = score_1 * (1 - score_1_1)  # 0~1
-            last_frame_score = (1 - score_2) * score_2_1  # 0~1
+            first_frame_score = score_1_0 * (1 - score_1_1)  # 0~1
+            last_frame_score = (1 - score_2_0) * score_2_1  # 0~1
             temp_score = first_frame_score * last_frame_score
         except:
             temp_score = "bad reply"
 
-        flag = -1
-        if temp_score != 0 and temp_score != "bad reply":
+        if temp_score == "bad reply" or temp_score == 0:
+            write_to_csv(
+                csv_path,
+                benchmark_name="dynamic_attr",
+                grid_image_name=frame_image_name,
+                this_prompt=this_prompt,
+                out=out,
+                inter_answers=inter_answers,
+                score_1_0=score_1_0,
+                score_1_1=score_1_1,
+                score_2_0=score_2_0,
+                score_2_1=score_2_1,
+                flag=-1,
+                score_total=0 if temp_score == 0 else "bad reply 4",
+            )
 
-            # check the intermediate states
-            flag = 0
-            flag_cnt = 0  # for intermediate state
-            intermediate_frames = 8 - 2
-            frame_array = np.arange(1, 7)
+        matched_frames_cnt = 0  # for intermediate state
+        has_matched_intermediate_frames = False
+        intermediate_frames = 8 - 2
 
-            for j, inter_state in enumerate(frame_array):
-                set_seed(args.seed)
-                image_file = [
-                    os.path.join(
-                        frame_folder, frame_images[i], image_files[inter_state]
-                    )
-                ]
-                images = load_images(image_file)
-                image_sizes = [x.size for x in images]
-                images_tensor = process_images(
-                    images, image_processor, model.config
-                ).to(model.device, dtype=torch.float16)
+        for inter_state in range(1, 7):
+            # set seed
+            set_seed(args.seed)
 
-                qs = initial
-                qs = DEFAULT_IMAGE_TOKEN + "\n" + qs
-                conv = conv_templates["chatml_direct"].copy()
+            # prepare image input
+            image_file = [
+                os.path.join(frame_folder, frame_images[i], image_files[inter_state])
+            ]
+            images = load_images(image_file)
+            image_sizes = [x.size for x in images]
+            images_tensor = process_images(images, image_processor, model.config).to(
+                model.device, dtype=torch.float16
+            )
 
-                conv.append_message(conv.roles[0], qs)
-                conv.append_message(conv.roles[1], None)
-                prompt = conv.get_prompt()
-
-                input_ids = (
+            # conversation 1
+            conv = conv_templates["chatml_direct"].copy()
+            conv.append_message(conv.roles[0], Q1)
+            conv.append_message(conv.roles[1], None)
+            with torch.inference_mode():
+                output_ids = model.generate(
                     tokenizer_image_token(
-                        prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
+                        conv.get_prompt(),
+                        tokenizer,
+                        IMAGE_TOKEN_INDEX,
+                        return_tensors="pt",
                     )
                     .unsqueeze(0)
-                    .cuda()
+                    .cuda(),
+                    images=images_tensor,
+                    image_sizes=image_sizes,
+                    do_sample=True if args.temperature > 0 else False,
+                    temperature=args.temperature,  # 0.2
+                    top_p=args.top_p,
+                    num_beams=args.num_beams,  # 1
+                    max_new_tokens=args.max_new_tokens,  # 512
+                    use_cache=True,
                 )
+            outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
+                0
+            ].strip()
+            out.append(outputs)  # out[6] out[8]
+            conv.messages[-1][-1] = outputs
 
-                with torch.inference_mode():
-                    output_ids = model.generate(
-                        input_ids,
-                        images=images_tensor,
-                        image_sizes=image_sizes,
-                        do_sample=True if args.temperature > 0 else False,
-                        temperature=args.temperature,  # 0.2
-                        top_p=args.top_p,
-                        num_beams=args.num_beams,  # 1
-                        max_new_tokens=args.max_new_tokens,  # 512
-                        use_cache=True,
-                    )
-
-                outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                    0
-                ].strip()
-                out.append(outputs)  # out[6] out[8]
-                conv.messages[-1][-1] = outputs
-
-                qs = f"Evaluate if the image aligns with the prompt '{phrase_0}' or '{phrase_1}'. \
-Give a score from 3 to 0 according the criteria: \
-3: the image matches the prompt '{phrase_0}'. \
-2: the image matches the prompt '{phrase_1}'. \
-1: the image contains objects in both prompts.\
-0: the image does not match either of the two prompts. \
-Provide your analysis and explanation in JSON format with the following keys: score \
-(e.g., 1), explanation (within 20 words)."
-                question.append(qs)
-
-                conv.append_message(conv.roles[0], qs)
-                conv.append_message(conv.roles[1], None)
-                prompt = conv.get_prompt()
-
-                input_ids = (
+            # conversation 3
+            Q3 = Q3_template.format(phrase_0=state_0, phrase_1=state_1)
+            conv.append_message(conv.roles[0], Q3)
+            conv.append_message(conv.roles[1], None)
+            with torch.inference_mode():
+                output_ids = model.generate(
                     tokenizer_image_token(
-                        prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt"
+                        conv.get_prompt(),
+                        tokenizer,
+                        IMAGE_TOKEN_INDEX,
+                        return_tensors="pt",
                     )
                     .unsqueeze(0)
-                    .cuda()
+                    .cuda(),
+                    images=images_tensor,
+                    image_sizes=image_sizes,
+                    do_sample=True if args.temperature > 0 else False,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    num_beams=args.num_beams,
+                    max_new_tokens=args.max_new_tokens,
+                    use_cache=True,
                 )
+            outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
+                0
+            ].strip()
+            out.append(outputs)  # out[7] out[9] ...
+            inter_answers.append(outputs)
 
-                with torch.inference_mode():
-                    output_ids = model.generate(
-                        input_ids,
-                        images=images_tensor,
-                        image_sizes=image_sizes,
-                        do_sample=True if args.temperature > 0 else False,
-                        temperature=args.temperature,
-                        top_p=args.top_p,
-                        num_beams=args.num_beams,
-                        max_new_tokens=args.max_new_tokens,
-                        use_cache=True,
-                    )
+            # get score from outputs
+            pattern = r'"score":\s*(\d+(\.\d+)?),'
+            match = re.search(pattern, outputs)
+            if match:
+                score_tmp = float(match.group(1))
+            else:
+                score_tmp = -1
+                print("No score found")
+            if score_tmp > 0:
+                matched_frames_cnt += 1
 
-                outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                    0
-                ].strip()
-                out.append(outputs)  # out[7] out[9] ...
-                inter_answers.append(outputs)
-
-                # get score from outputs
-                pattern = r'"score":\s*(\d+(\.\d+)?),'
-                match = re.search(pattern, outputs)
-                if match:
-                    score_tmp = float(match.group(1))
-                else:
-                    score_tmp = -1
-                    print("No score found")
-                print(outputs)
-
-                if score_tmp > 0:
-                    flag_cnt += 1
-                if flag_cnt > intermediate_frames * 0.65:
-                    break
-            if (
-                flag_cnt > intermediate_frames * 0.65
-            ):  # threshold for intermediate frames
-                flag = 1
-            score_total = temp_score * flag
-
-        elif temp_score == 0:
-            score_total = temp_score
-        else:
-            score_total = "bad reply 4"
-
+            if matched_frames_cnt > intermediate_frames * 0.65:
+                has_matched_intermediate_frames = True
+                break
+        score_total = temp_score if has_matched_intermediate_frames else 0
         print("score total for", frame_images[i], score_total)
 
-        csv_writer.writerow(
-            [
-                frame_image_name,
-                this_prompt,
-                out[0],
-                out[1],
-                out[2],
-                out[3],
-                out[4],
-                out[5],
-                inter_answers,
-                score_1,
-                score_1_1,
-                score_2,
-                score_2_1,
-                flag,
-                score_total,
-            ]
+        write_to_csv(
+            csv_path,
+            benchmark_name="dynamic_attr",
+            grid_image_name=frame_image_name,
+            this_prompt=this_prompt,
+            out=out,
+            inter_answers=inter_answers,
+            score_1_0=score_1_0,
+            score_1_1=score_1_1,
+            score_2_0=score_2_0,
+            score_2_1=score_2_1,
+            flag=1 if has_matched_intermediate_frames else 0,
+            score_total=score_total,
         )
-        csvfile.flush()
 
     return csv_path
-
-
-def model_score(csv_path):
-    with open(csv_path, "r") as file:
-        reader = csv.reader(file)
-        lines = list(reader)
-        score = 0
-        cnt = 0
-        for line in lines[1:]:
-            try:
-                score_tmp = float(line[-1])
-                score += score_tmp
-                cnt += 1
-            except:
-                continue
-
-        score = score / cnt
-        print(
-            "number of images evaluated: ",
-            cnt,
-            " dynamic attribute binding model score: ",
-            score,
-        )
-
-    with open(csv_path, "a", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["score: ", score])
 
 
 if __name__ == "__main__":

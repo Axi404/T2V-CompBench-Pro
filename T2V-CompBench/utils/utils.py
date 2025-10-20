@@ -107,7 +107,25 @@ def write_to_csv(
     try:
         csv_writer = csv.writer(csvfile)
         if benchmark_name == "dynamic_attr":
-            pass
+            csv_writer.writerow(
+                [
+                    kwargs["grid_image_name"],
+                    kwargs["this_prompt"],
+                    kwargs["out"][0],
+                    kwargs["out"][1],
+                    kwargs["out"][2],
+                    kwargs["out"][3],
+                    kwargs["out"][4],
+                    kwargs["out"][5],
+                    kwargs["inter_answers"],
+                    kwargs["score_1_0"],
+                    kwargs["score_1_1"],
+                    kwargs["score_2_0"],
+                    kwargs["score_2_1"],
+                    kwargs["flag"],
+                    kwargs["score_total"],
+                ]
+            )
         else:
             csv_writer.writerow(
                 [
@@ -148,7 +166,7 @@ def model_score(csv_path):
                 continue
         score = score / cnt
         print(
-            "number of images evaluated: ", cnt, " action binding model score: ", score
+            "number of images evaluated: ", cnt, " model score: ", score
         )
 
     with open(csv_path, "a", newline="") as file:
