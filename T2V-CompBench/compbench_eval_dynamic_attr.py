@@ -42,7 +42,7 @@ def eval_model(args):
         prompts = json.load(json_data)
 
     csv_path, line_count = initialize_csv(
-        args.output_path, args.t2v_model, "dynamic_attr"
+        args.output_path, args.t2v_model, "dynamic_attr_score"
     )
 
     frame_images = [f for f in os.listdir(frame_folder) if f[0].isdigit()]

@@ -51,7 +51,7 @@ def eval_model(args):
         prompts = json.load(json_data)
 
     csv_path, line_count = initialize_csv(
-        args.output_path, args.t2v_model, "object_interaction"
+        args.output_path, args.t2v_model, "object_interaction_score"
     )
     evaluated = max(line_count - 1, 0)
 

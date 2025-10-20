@@ -51,7 +51,7 @@ def eval_model(args):
         prompts = json.load(json_data)
 
     csv_path, line_count = initialize_csv(
-        args.output_path, args.t2v_model, "action_binding"
+        args.output_path, args.t2v_model, "action_binding_score"
     )
 
     grid_images = [f for f in os.listdir(image_grid_path) if f[0].isdigit()]
