@@ -1,9 +1,11 @@
 import os
-import csv
 import json
 import random
+
+import csv
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
 
 
 def extract_json(string):
@@ -70,6 +72,32 @@ def initialize_csv(output_path: str, t2v_model: str, benchmark_name: str):
                     "score_2_1",
                     "flag",
                     "Score",
+                )
+            elif benchmark_name == "background" or benchmark_name == "foreground":
+                csv_writer.writerow(
+                    [
+                        "id",
+                        "prompt",
+                        "object_1",
+                        "d_1",
+                        "object_2",
+                        "d_2",
+                        "mask_name",
+                        "xy_json",
+                        "change_in_x",
+                        "change_in_y",
+                    ]
+                )
+            elif benchmark_name == "2dframe" or benchmark_name == "3dframe":
+                csv_writer.writerow(
+                    [
+                        "video_name",
+                        "image_name",
+                        "prompt",
+                        "object_1",
+                        "object_2",
+                        "score",
+                    ]
                 )
             elif benchmark_name == "numeracy_frame":
                 csv_writer.writerow(
@@ -138,6 +166,32 @@ def write_to_csv(
                     kwargs["score_total"],
                 ]
             )
+        elif benchmark_name == "background" or benchmark_name == "foreground":
+            csv_writer.writerow(
+                [
+                    kwargs["vid"],
+                    kwargs["prompt"],
+                    kwargs["object_1"],
+                    kwargs["d_1"],
+                    kwargs["object_2"],
+                    kwargs["d_2"],
+                    kwargs["mask_name"],
+                    kwargs["xy_json"],
+                    kwargs["change_in_x"],
+                    kwargs["change_in_y"],
+                ]
+            )
+        elif benchmark_name == "2dframe" or benchmark_name == "3dframe":
+            csv_writer.writerow(
+                [
+                    kwargs["video_name"],
+                    kwargs["image_name"],
+                    kwargs["prompt"],
+                    kwargs["m0"],
+                    kwargs["m1"],
+                    kwargs["score_1"],
+                ]
+            )
         elif benchmark_name == "numeracy_frame":
             csv_writer.writerow(
                 kwargs["video_name"],
@@ -193,6 +247,7 @@ def model_score(csv_path):
         writer = csv.writer(file)
         writer.writerow(["score: ", score])
 
+
 def combine_frame_numeracy(input_csv, output_csv):
     score_total = 0
     cnt = 0
@@ -225,29 +280,6 @@ def combine_frame_numeracy(input_csv, output_csv):
             score_total += score_tmp
 
     score_avg = score_total / cnt
-
-    ####################################
-    # socre_obj_1 = score_vid_1[0:20]
-    # score_one_obj_2 = score_vid_1[20:50]
-    # score_one_obj_3 = score_vid_1[50:80]
-    # score_one_obj_4 = score_vid_1[80:110]
-    # score_one_obj_5 = score_vid_1[110:140]
-    # score_one_obj_678 = score_vid_1[140:160]
-    # score_two_obj_low = score_vid_1[160:175]
-    # score_two_obj_mid = score_vid_1[175:190]
-    # score_two_obj_high = score_vid_1[190:200]
-
-    # socre_obj_1 = sum(socre_obj_1) / len(socre_obj_1)
-    # score_one_obj_2 = sum(score_one_obj_2) / len(score_one_obj_2)
-    # score_one_obj_3 = sum(score_one_obj_3) / len(score_one_obj_3)
-    # score_one_obj_4 = sum(score_one_obj_4) / len(score_one_obj_4)
-    # score_one_obj_5 = sum(score_one_obj_5) / len(score_one_obj_5)
-    # score_one_obj_678 = sum(score_one_obj_678) / len(score_one_obj_678)
-    # score_two_obj_low = sum(score_two_obj_low) / len(score_two_obj_low)
-    # score_two_obj_mid = sum(score_two_obj_mid) / len(score_two_obj_mid)
-    # score_two_obj_high = sum(score_two_obj_high) / len(score_two_obj_high)
-    ####################################
-
     print("number of videos evaluated: ", cnt, " numeracy model score: ", score_avg)
 
     score_vid_1 = ["Score_1"] + score_vid_1
@@ -267,14 +299,133 @@ def combine_frame_numeracy(input_csv, output_csv):
 
     with open(output_csv, "a", newline="") as file:
         writer = csv.writer(file)
-
-        # writer.writerow(["socre_obj_1: ",socre_obj_1])
-        # writer.writerow(["score_one_obj_2: ",score_one_obj_2])
-        # writer.writerow(["score_one_obj_3: ",score_one_obj_3])
-        # writer.writerow(["score_one_obj_4: ",score_one_obj_4])
-        # writer.writerow(["score_one_obj_5: ",score_one_obj_5])
-        # writer.writerow(["score_one_obj_678: ",score_one_obj_678])
-        # writer.writerow(["score_two_obj_low: ",score_two_obj_low])
-        # writer.writerow(["score_two_obj_mid: ",score_two_obj_mid])
-        # writer.writerow(["score_two_obj_high: ",score_two_obj_high])
         writer.writerow(["score: ", score_avg])
+
+
+def combine_frame_spatial_relationships(input_csv, output_csv):
+    with open(input_csv, "r") as file:
+        reader = csv.reader(file)
+        lines = list(reader)
+        batch_size = 16
+        num_vid = (len(lines) - 1) / batch_size
+        if num_vid != int(num_vid):
+            print("error: number of lines WRONG")
+
+        score_vid_1 = []
+        id = []
+        score_frame_1 = []
+        for i in range(int(num_vid)):
+            batch = lines[i * batch_size + 1 : (i + 1) * batch_size + 1]
+            # Process the batch of lines
+            frame_score_1 = []
+
+            id.append(batch[0][0])
+            for line in batch:
+                my_score_1 = float(line[-1])
+
+                if my_score_1 < -1:  # =-2
+                    my_score_1 = 0
+                elif my_score_1 < 0:  # =-1
+                    my_score_1 = 0.2
+                elif my_score_1 == 0:  # =0
+                    my_score_1 = 0.4
+                elif my_score_1 > 0:
+                    my_score_1 = (my_score_1 * 0.6) + 0.4
+                frame_score_1.append(my_score_1)
+
+            score_vid_1.append(sum(frame_score_1) / 16)
+            score_frame_1.append(frame_score_1)
+
+    score_vid_1 = ["Score_1"] + score_vid_1
+    id = ["id"] + id
+    score_frame_1 = ["Score_frame_1"] + score_frame_1
+
+    if len(score_vid_1) != len(score_frame_1) != len(id):
+        print("counting error")
+
+    with open(output_csv, "w") as output_file:
+        writer = csv.writer(output_file)
+        for i in range(len(id)):
+            # Append data to the end of each row
+            row = [id[i], score_frame_1[i], score_vid_1[i]]
+            # Write the modified row to the new file
+            writer.writerow(row)
+
+    return output_csv
+
+
+def combine_csv_and_cal_model_score(csv_2d, csv_3d, output_file):
+
+    with open(csv_2d, "r") as file:
+        reader = csv.reader(file)
+        lines_2d = list(reader)
+    with open(csv_3d, "r") as file2:
+        reader2 = csv.reader(file2)
+        lines_3d = list(reader2)
+
+    lines = lines_2d[1:] + lines_3d[1:]
+    lines = sorted(lines, key=lambda x: int(x[0]))  # Sort by the first element
+    lines = [["id", "score_frame", "Score"]] + lines
+    score = []
+    print(lines)
+    for line in lines[1:]:
+        score.append(float(line[-1]))
+
+    score = sum(score) / len(score)
+
+    with open(output_file, "w") as outfile:
+        writer = csv.writer(outfile)
+        writer.writerows(lines)
+        writer.writerow(["Score: ", score])
+
+
+def save_mask_data(output_dir, mask_list, box_list, label_list):
+    # value = 0  # 0 for background
+    value = 1
+
+    mask_img = torch.ones(mask_list.shape[-2:])
+    for idx, mask in enumerate(mask_list):
+        # mask_img[mask.cpu().numpy()[0] == True] = value + idx + 1
+        mask_img[mask.cpu().numpy()[0] == True] = value - 1
+    plt.figure(figsize=(10, 10))
+    plt.imshow(mask_img.numpy(), cmap="gray")
+    plt.axis("off")
+    plt.savefig(
+        os.path.join(output_dir, "mask_background.jpg"),
+        bbox_inches="tight",
+        dpi=300,
+        pad_inches=0.0,
+    )
+
+    json_data = [{"value": value, "label": "background"}]
+    for label, box in zip(label_list, box_list):
+        value += 1
+        name, logit = label.split("(")
+        logit = logit[:-1]  # the last is ')'
+        json_data.append(
+            {
+                "value": value,
+                "label": name,
+                "logit": float(logit),
+                "box": box.numpy().tolist(),
+            }
+        )
+    with open(os.path.join(output_dir, "mask.json"), "w") as f:
+        json.dump(json_data, f)
+
+
+def save_mask_foreground(output_dir, mask, obj_prompt):
+    # value = 0  # 0 for background
+    value = 0
+
+    mask_img = torch.zeros(mask.shape[-2:])
+    mask_img[mask.cpu().numpy()[0] == True] = value + 1
+    plt.figure(figsize=(10, 10))
+    plt.imshow(mask_img.numpy(), cmap="gray")
+    plt.axis("off")
+    plt.savefig(
+        os.path.join(output_dir, f"mask_foreground_{obj_prompt}.jpg"),
+        bbox_inches="tight",
+        dpi=300,
+        pad_inches=0.0,
+    )

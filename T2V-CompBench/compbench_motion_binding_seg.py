@@ -1,24 +1,27 @@
 import argparse
 import os
 
+import cv2
 import json
+import matplotlib.pyplot as plt
 import torch
 
 # Grounding DINO
 from ..GSA.GroundingDINO.groundingdino.models import build_model
 from ..GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
 from ..GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
+from ..GSA.segment_anything.segment_anything import (
+    sam_model_registry,
+    sam_hq_model_registry,
+    SamPredictor,
+)
 
-
-from ..GSA.segment_anything.segment_anything import sam_model_registry, sam_hq_model_registry, SamPredictor
-import cv2
-import numpy as np
-import matplotlib.pyplot as plt
 
 from .utils.draw_utils import show_mask, show_box
 from .utils.grounding_utils import get_grounding_output
 from .utils.image_utils import load_and_process_image
 from .utils.video_utils import convert_video_to_frames, convert_video_to_standard_video
+from .utils.utils import save_mask_foreground, save_mask_data
 
 
 def load_model(model_config_path, model_checkpoint_path, device):
@@ -32,58 +35,6 @@ def load_model(model_config_path, model_checkpoint_path, device):
     print(load_res)
     _ = model.eval()
     return model
-
-
-def save_mask_data(output_dir, mask_list, box_list, label_list):
-    # value = 0  # 0 for background
-    value = 1
-
-    mask_img = torch.ones(mask_list.shape[-2:])
-    for idx, mask in enumerate(mask_list):
-        # mask_img[mask.cpu().numpy()[0] == True] = value + idx + 1
-        mask_img[mask.cpu().numpy()[0] == True] = value - 1
-    plt.figure(figsize=(10, 10))
-    plt.imshow(mask_img.numpy(), cmap="gray")
-    plt.axis("off")
-    plt.savefig(
-        os.path.join(output_dir, "mask_background.jpg"),
-        bbox_inches="tight",
-        dpi=300,
-        pad_inches=0.0,
-    )
-
-    json_data = [{"value": value, "label": "background"}]
-    for label, box in zip(label_list, box_list):
-        value += 1
-        name, logit = label.split("(")
-        logit = logit[:-1]  # the last is ')'
-        json_data.append(
-            {
-                "value": value,
-                "label": name,
-                "logit": float(logit),
-                "box": box.numpy().tolist(),
-            }
-        )
-    with open(os.path.join(output_dir, "mask.json"), "w") as f:
-        json.dump(json_data, f)
-
-
-def save_mask_foreground(output_dir, mask, obj_prompt):
-    # value = 0  # 0 for background
-    value = 0
-
-    mask_img = torch.zeros(mask.shape[-2:])
-    mask_img[mask.cpu().numpy()[0] == True] = value + 1
-    plt.figure(figsize=(10, 10))
-    plt.imshow(mask_img.numpy(), cmap="gray")
-    plt.axis("off")
-    plt.savefig(
-        os.path.join(output_dir, f"mask_foreground_{obj_prompt}.jpg"),
-        bbox_inches="tight",
-        dpi=300,
-        pad_inches=0.0,
-    )
 
 
 def foreground_background_mask(args):
@@ -139,13 +90,11 @@ def foreground_background_mask(args):
         video_name = videos[k]
         num = int(video_name[0:4]) - 1
 
-        prompt = prompts[num]["prompt"]
         object_1 = prompts[num]["object_1"]  # A is on the left of B
         object_2 = prompts[num]["object_2"]
         d_1 = prompts[num]["d_1"]
         d_2 = prompts[num]["d_2"]
 
-        # print(object_1,object_2)
         directions = ["left", "right", "up", "down", ""]
         if d_1 not in directions[:4] or d_2 not in directions:
             print(d_1, d_2, " direction not included!!!, index: ", k)
@@ -203,11 +152,9 @@ def foreground_background_mask(args):
             plt.figure(figsize=(10, 10))
             plt.imshow(image)
             for mask in masks:
-                # show_mask(mask.cpu().numpy(), plt.gca(), random_color=True)
                 show_mask(mask.cpu().numpy(), plt.gca(), random_color=False)
             for box, label in zip(boxes_filt, pred_phrases):
                 show_box(box.numpy(), plt.gca(), label)
-
             plt.axis("off")
             plt.savefig(
                 os.path.join(
@@ -262,7 +209,6 @@ def foreground_background_mask(args):
         plt.figure(figsize=(10, 10))
         plt.imshow(image)
         for mask in masks:
-            # show_mask(mask.cpu().numpy(), plt.gca(), random_color=True)
             show_mask(mask.cpu().numpy(), plt.gca(), random_color=False)
         for box, label in zip(boxes_filt, pred_phrases):
             show_box(box.numpy(), plt.gca(), label)

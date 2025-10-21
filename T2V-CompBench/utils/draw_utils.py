@@ -3,8 +3,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+
 def plot_boxes_to_image(
-    image_pil: Image.Image, tgt: dict, prompt_objs: list
+    image_pil: Image.Image, tgt: dict, prompt_objs: list, color1=None, color2=None
 ) -> tuple[Image.Image, Image.Image]:
     H, W = tgt["size"]
     boxes = tgt["boxes"]
@@ -12,9 +13,9 @@ def plot_boxes_to_image(
     assert len(boxes) == len(labels), "boxes and labels must have same length"
 
     objs = [label.split("(")[0] for label in labels]
-    if len(prompt_objs) == 1:
+    if len(prompt_objs) == 1 and color1 is None:
         color1 = (255, 0, 0)
-    elif len(prompt_objs) == 2:
+    elif len(prompt_objs) == 2 and color1 is None and color2 is None:
         color1 = (255, 0, 0)
         color2 = (0, 0, 255)
     else:
@@ -26,13 +27,20 @@ def plot_boxes_to_image(
 
     # draw boxes and masks
     for box, label, obj in zip(boxes, labels, objs):
+        # TODO: spatial relationships
+        # if obj == prompt_objs[0]:  # obj1
+        #     color = color1
+        # elif obj == prompt_objs[1]:  # obj2
+        #     color = color2
+        # else:
+        #     print("wrong objects")
+        #     color = (0, 0, 0)
+        # Check the difference
         if obj == prompt_objs[0]:  # obj1
             color = color1
-            # print("color1")
         elif len(prompt_objs) == 2:
             if obj == prompt_objs[1]:  # obj2
                 color = color2
-                # print("color2")
         else:
             print("wrong objects")
             color = (0, 0, 0)
@@ -68,11 +76,17 @@ def plot_boxes_to_image(
 
     return image_pil, mask
 
-def show_mask(mask, ax, random_color=False):
+
+def show_mask(
+    mask,
+    ax,
+    my_color=np.array([255 / 255, 255 / 255, 255 / 255, 0.6]),
+    random_color=False,
+):
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
     else:
-        color = np.array([255 / 255, 255 / 255, 255 / 255, 0.6])
+        color = my_color
     h, w = mask.shape[-2:]
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
     ax.imshow(mask_image)

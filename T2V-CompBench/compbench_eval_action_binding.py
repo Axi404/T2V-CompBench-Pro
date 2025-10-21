@@ -2,7 +2,6 @@ import argparse
 import os
 
 import torch
-import csv
 import json
 
 from ..LLaVA.llava.model.builder import load_pretrained_model

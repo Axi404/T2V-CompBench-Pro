@@ -9,7 +9,7 @@ from ..GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
 from ..GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
 
 from .utils.video_utils import convert_video_to_frames
-from .utils.box_utils import filter_box
+from .utils.relation_utils import filter_box
 from .utils.draw_utils import plot_boxes_to_image
 from .utils.image_utils import load_and_process_image
 from .utils.utils import initialize_csv, write_to_csv, combine_frame_numeracy
@@ -54,7 +54,7 @@ def process_single_image_with_single_object(
             objs[j],
             box_threshold,
             text_threshold,
-            cpu_only=args.cpu_only,
+            cpu_only=cpu_only,
         )
         size = image_pil.size
         all_box = all_box + [boxes_filt_0]
@@ -148,7 +148,6 @@ def eval_model(args):
         video_path = os.path.join(frame_folder, videos[i])
         images = os.listdir(video_path)
         images.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))  # sort
-
         video_name = videos[i]
         num = int(video_name[0:4]) - 1
 
