@@ -1,14 +1,20 @@
 import argparse
 import json
 import os
+import sys
 
 import torch
 
-from ..LLaVA.llava.model.builder import load_pretrained_model
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-from .utils.conversation_utils import conv_templates
-from .utils.image_utils import load_images
-from .utils.llava_utils import (
+from LLaVA.llava.model.builder import load_pretrained_model
+
+from utils.conversation_utils import conv_templates
+from utils.image_utils import load_images
+from utils.llava_utils import (
     DEFAULT_IMAGE_TOKEN,
     IMAGE_TOKEN_INDEX,
     disable_torch_init,
@@ -16,21 +22,21 @@ from .utils.llava_utils import (
     process_images,
     tokenizer_image_token,
 )
-from .utils.prompt_utils import (
+from utils.prompt_utils import (
     INTERACTION_PROMPT_TEMPLATE_Q1 as Q1_template,
     INTERACTION_PROMPT_TEMPLATE_Q2 as Q2_template,
     INTERACTION_PROMPT_TEMPLATE_Q3_A as Q3_A_template,
     INTERACTION_PROMPT_TEMPLATE_Q3_B as Q3_B_template,
     INTERACTION_PROMPT_TEMPLATE_Q3_C as Q3_C_template,
 )
-from .utils.utils import (
+from utils.utils import (
     extract_json,
     initialize_csv,
     model_score,
     set_seed,
     write_to_csv,
 )
-from .utils.video_utils import convert_video_to_grid
+from utils.video_utils import convert_video_to_grid
 
 
 def eval_model(args):
@@ -272,7 +278,7 @@ def eval_model(args):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-path", type=str, default="liuhaotian/llava-v1.6-34b")
+    parser.add_argument("--model-path", type=str, default="./weights/llava-v1.6-34b")
     parser.add_argument("--model-base", type=str, default=None)
     parser.add_argument("--conv-mode", type=str, default=None)
     parser.add_argument("--sep", type=str, default=",")
@@ -283,13 +289,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-path",
         type=str,
-        default="../csv_output_interactions",
+        default="playground/results/csv_interaction",
         help="path to store the video scores",
     )
     parser.add_argument(
         "--read-prompt-file",
         type=str,
-        default="../meta_data/object_interactions.json",
+        default="playground/meta_data/object_interactions.json",
         help="path of txt file with input prompts and meta data",
     )
     parser.add_argument("--seed", type=int, default=0)

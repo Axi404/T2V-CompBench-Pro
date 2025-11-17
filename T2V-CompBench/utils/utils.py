@@ -194,13 +194,15 @@ def write_to_csv(
             )
         elif benchmark_name == "numeracy_frame":
             csv_writer.writerow(
-                kwargs["video_name"],
-                kwargs["image_name"],
-                kwargs["prompt"],
-                kwargs["objects"],
-                kwargs["numbers"],
-                kwargs["actual_numbers"],
-                kwargs["score"],
+                [
+                    kwargs["video_name"],
+                    kwargs["image_name"],
+                    kwargs["prompt"],
+                    kwargs["objects"],
+                    kwargs["numbers"],
+                    kwargs["actual_numbers"],
+                    kwargs["score"],
+                ]
             )
         else:
             csv_writer.writerow(

@@ -1,27 +1,33 @@
 import argparse
 import os
+import sys
 
 import cv2
 import json
 import matplotlib.pyplot as plt
 import torch
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 # Grounding DINO
-from ..GSA.GroundingDINO.groundingdino.models import build_model
-from ..GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
-from ..GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
-from ..GSA.segment_anything.segment_anything import (
+from GSA.GroundingDINO.groundingdino.models import build_model
+from GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
+from GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
+from GSA.segment_anything.segment_anything import (
     sam_model_registry,
     sam_hq_model_registry,
     SamPredictor,
 )
 
 
-from .utils.draw_utils import show_mask, show_box
-from .utils.grounding_utils import get_grounding_output
-from .utils.image_utils import load_and_process_image
-from .utils.video_utils import convert_video_to_frames, convert_video_to_standard_video
-from .utils.utils import save_mask_foreground, save_mask_data
+from utils.draw_utils import show_mask, show_box
+from utils.grounding_utils import get_grounding_output
+from utils.image_utils import load_and_process_image
+from utils.video_utils import convert_video_to_frames, convert_video_to_standard_video
+from utils.utils import save_mask_foreground, save_mask_data
 
 
 def load_model(model_config_path, model_checkpoint_path, device):
@@ -234,13 +240,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         type=str,
-        default="Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
+        default="GSA/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
         help="path to config file",
     )
     parser.add_argument(
         "--grounded_checkpoint",
         type=str,
-        default="Grounded-Segment-Anything/GroundingDINO/weights/groundingdino_swint_ogc.pth",
+        default="GSA/GroundingDINO/weights/groundingdino_swint_ogc.pth",
         help="path to checkpoint file",
     )
     parser.add_argument(
@@ -253,7 +259,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sam_checkpoint",
         type=str,
-        default="Grounded-Segment-Anything/sam_vit_h_4b8939.pth",
+        default="GSA/sam_vit_h_4b8939.pth",
         help="path to sam checkpoint file",
     )
     parser.add_argument(
@@ -281,13 +287,13 @@ if __name__ == "__main__":
     parser.add_argument("--total_frame", type=str, required=True)
     parser.add_argument("--fps", type=str, required=True)
     parser.add_argument(
-        "--read-prompt-file", type=str, default="meta_data/motion_binding.json"
+        "--read-prompt-file", type=str, default="playground/meta_data/motion_binding.json"
     )
     parser.add_argument(
         "--output_dir",
         "-o",
         type=str,
-        default="output_motion_binding_seg",
+        default="playground/results/output_motion_binding_seg",
         help="output directory of 1st frame segmentations",
     )
     args = parser.parse_args()

@@ -1,19 +1,25 @@
 import argparse
 import json
 import os
+import sys
 
 import torch
 
-from ..GSA.GroundingDINO.groundingdino.models import build_model
-from ..GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
-from ..GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-from .utils.video_utils import convert_video_to_frames
-from .utils.relation_utils import filter_box
-from .utils.draw_utils import plot_boxes_to_image
-from .utils.image_utils import load_and_process_image
-from .utils.utils import initialize_csv, write_to_csv, combine_frame_numeracy
-from .utils.grounding_utils import get_grounding_output
+from GSA.GroundingDINO.groundingdino.models import build_model
+from GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
+from GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
+
+from utils.video_utils import convert_video_to_frames
+from utils.relation_utils import filter_box
+from utils.draw_utils import plot_boxes_to_image
+from utils.image_utils import load_and_process_image
+from utils.utils import initialize_csv, write_to_csv, combine_frame_numeracy
+from utils.grounding_utils import get_grounding_output
 
 
 def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
@@ -54,7 +60,7 @@ def process_single_image_with_single_object(
             objs[j],
             box_threshold,
             text_threshold,
-            cpu_only=cpu_only,
+            # device="cpu" if cpu_only else "cuda",
         )
         size = image_pil.size
         all_box = all_box + [boxes_filt_0]
@@ -206,27 +212,27 @@ if __name__ == "__main__":
         "--config_file",
         "-c",
         type=str,
-        default="Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
+        default="GSA/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
         help="path to config file",
     )
     parser.add_argument(
         "--checkpoint_path",
         "-p",
         type=str,
-        default="Grounded-Segment-Anything/GroundingDINO/weights/groundingdino_swint_ogc.pth",
+        default="GSA/GroundingDINO/weights/groundingdino_swint_ogc.pth",
         help="path to checkpoint file",
     )
     parser.add_argument(
         "--output_dir",
         "-o",
         type=str,
-        default="output_numeracy",
+        default="playground/results/output_numeracy",
         help="directory to save the output images",
     )
     parser.add_argument(
         "--output-path",
         type=str,
-        default="csv_numeracy",
+        default="playground/results/csv_numeracy",
         help="path to store the video scores",
     )
     parser.add_argument(
@@ -247,7 +253,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--read-prompt-file",
         type=str,
-        default="meta_data/generative_numeracy.json",
+        default="playground/meta_data/generative_numeracy.json",
         help="path to the meta data",
     )
     parser.add_argument(

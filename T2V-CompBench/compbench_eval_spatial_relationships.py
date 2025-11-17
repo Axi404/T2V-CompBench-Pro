@@ -10,35 +10,40 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 # Grounding DINO
-from ..DA.compbench_run_depth import run_depth
-from ..GSA.GroundingDINO.groundingdino.models import build_model
-from ..GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
-from ..GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
-from ..GSA.segment_anything.segment_anything import (
+from DA.compbench_run_depth import run_depth
+from GSA.GroundingDINO.groundingdino.models import build_model
+from GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
+from GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
+from GSA.segment_anything.segment_anything import (
     sam_model_registry,
     sam_hq_model_registry,
     SamPredictor,
 )
 
-from .utils.relation_utils import (
+from utils.relation_utils import (
     filter_box,
     spatial_judge,
     pick_max_2d,
     intersection_judge,
     pick_max_3d,
 )
-from .utils.image_utils import load_and_process_image
-from .utils.draw_utils import plot_boxes_to_image, show_box, show_mask
-from .utils.utils import (
+from utils.image_utils import load_and_process_image
+from utils.draw_utils import plot_boxes_to_image, show_box, show_mask
+from utils.utils import (
     combine_frame_spatial_relationships,
     combine_csv_and_cal_model_score,
     initialize_csv,
     write_to_csv,
 )
-from .utils.grounding_utils import get_grounding_output
+from utils.grounding_utils import get_grounding_output
 
-sys.path.append("./Depth-Anything")
+sys.path.append("./DA")
 
 
 def load_model(model_config_path, model_checkpoint_path, device):
@@ -695,13 +700,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config",
         type=str,
-        default="Grounded-Segment-Anything/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
+        default="GSA/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py",
         help="path to config file",
     )
     parser.add_argument(
         "--grounded_checkpoint",
         type=str,
-        default="Grounded-Segment-Anything/GroundingDINO/weights/groundingdino_swint_ogc.pth",
+        default="GSA/GroundingDINO/weights/groundingdino_swint_ogc.pth",
         help="path to checkpoint file",
     )
     parser.add_argument(
@@ -732,7 +737,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sam_checkpoint",
         type=str,
-        default="Grounded-Segment-Anything/sam_vit_h_4b8939.pth",
+        default="GSA/sam_vit_h_4b8939.pth",
         help="path to sam checkpoint file",
     )
     parser.add_argument(
@@ -745,7 +750,7 @@ if __name__ == "__main__":
         "--use_sam_hq", action="store_true", help="using sam-hq for prediction"
     )
 
-    parser.add_argument("--depth_folder", type=str, required=True)
+    parser.add_argument("--depth_folder", type=str, required=False, default="playground/results/output_spatial_depth")
     parser.add_argument(
         "--iou_threshold_3d",
         type=float,
@@ -755,11 +760,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-path",
         type=str,
-        default="csv_spatial",
+        default="playground/results/csv_spatial",
         help="path to store the video scores",
     )
     parser.add_argument(
-        "--read-prompt-file", type=str, default="meta_data/spatial_relationships.json"
+        "--read-prompt-file", type=str, default="playground/meta_data/spatial_relationships.json"
     )
     parser.add_argument("--video-path", type=str, required=True)
     parser.add_argument("--frame_folder", type=str)
@@ -767,7 +772,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="output_spatial/",
+        default="playground/results/output_spatial/",
         help="directory to save the output images",
     )
 

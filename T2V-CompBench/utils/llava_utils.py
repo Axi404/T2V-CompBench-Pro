@@ -3,6 +3,8 @@ import torch
 from PIL import Image
 import math
 
+from .conversation_utils import *
+
 # Constants
 CONTROLLER_HEART_BEAT_EXPIRATION = 30
 WORKER_HEART_BEAT_INTERVAL = 15

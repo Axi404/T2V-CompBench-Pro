@@ -4,7 +4,7 @@ addict==2.4.0
 diffusers==0.32.2
 gradio==4.14.0
 gradio_imageslider==0.0.20
--e git+https://github.com/IDEA-Research/GroundingDINO.git@16e0ccdb7da40613591666abe2cb06f91f961503#egg=groundingdino
+-e git+https://ghfast.top/https://github.com/IDEA-Research/GroundingDINO.git@16e0ccdb7da40613591666abe2cb06f91f961503#egg=groundingdino
 huggingface-hub==0.27.1
 matplotlib==3.8.4
 numpy==1.26.4

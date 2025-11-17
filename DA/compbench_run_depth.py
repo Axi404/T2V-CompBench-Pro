@@ -6,9 +6,15 @@ import torch
 import torch.nn.functional as F
 from torchvision.transforms import Compose
 from tqdm import tqdm
+import sys
 
-from depth_anything.dpt import DepthAnything
-from depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from .depth_anything.dpt import DepthAnything
+from .depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
 
 import json
 import cv2

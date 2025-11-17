@@ -2,7 +2,7 @@ import os
 import os.path as osp
 import math
 import json
-
+import sys
 import csv
 from matplotlib import colormaps
 import numpy as np
@@ -11,13 +11,17 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
-from ..dot.dot.utils.options.compbench_demo_options import DemoOptions
-from ..dot.dot.models import create_model
-from ..dot.dot.utils.io import write_video, read_video, read_frame
-from ..dot.dot.utils.torch import to_device, get_grid
+from dot.dot.utils.options.compbench_demo_options import DemoOptions
+from dot.dot.models import create_model
+from dot.dot.utils.io import write_video, read_video, read_frame
+from dot.dot.utils.torch import to_device, get_grid
 
-from .utils.utils import initialize_csv, write_to_csv
+from utils.utils import initialize_csv, write_to_csv
 
 
 def forward(data, mode, args):

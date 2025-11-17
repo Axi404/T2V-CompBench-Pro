@@ -3,14 +3,14 @@ import numpy as np
 import torch
 import os
 from torchvision.io import write_video
-
+from tqdm import tqdm
 
 def extract_frames(video_path, num_frames=16):
     frames = []
 
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    print("total frames", total_frames)
+    # print("total frames", total_frames)
     if total_frames <= num_frames:
         frame_indices = np.arange(total_frames)
     else:
@@ -56,6 +56,7 @@ def merge_grid(image_list):
 def read_video_path(video_path):
     if os.path.isdir(video_path):  # if video_path is a list of videos
         video = os.listdir(video_path)
+        video = [video for video in video if not os.path.isdir(os.path.join(video_path, video))]
     elif os.path.isfile(video_path):  # else if video_path is a single video
         video = [os.path.basename(video_path)]
         video_path = os.path.dirname(video_path)
@@ -72,7 +73,7 @@ def convert_video_to_frames(video_path, num_frames=16):
     )
     os.makedirs(output_path, exist_ok=True)
 
-    for v in video:
+    for v in tqdm(video):
         vid_id = v.split(".")[0]
         frames_dir = os.path.join(output_path, vid_id)
         os.makedirs(frames_dir, exist_ok=True)
@@ -95,7 +96,7 @@ def convert_video_to_standard_video(video_path, num_frames):
     )
     os.makedirs(output_path, exist_ok=True)
 
-    for v in video:
+    for v in tqdm(video):
         v_mp4 = v.split(".")[0] + ".mp4"
         convert_video(
             os.path.join(video_path, f"{v}"),
@@ -116,7 +117,7 @@ def convert_video_to_grid(video_path, num_image=6):
     )
     os.makedirs(output_path, exist_ok=True)
 
-    for v in video:
+    for v in tqdm(video):
         vid_id = v.split(".")[0]
         vid_path = os.path.join(video_path, v)
         frames = extract_frames(vid_path)
