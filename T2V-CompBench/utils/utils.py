@@ -229,27 +229,6 @@ def write_to_csv(
         csvfile.close()
 
 
-def model_score(csv_path):
-    with open(csv_path, "r") as file:
-        reader = csv.reader(file)
-        lines = list(reader)
-        score = 0
-        cnt = 0
-        for line in lines[1:]:
-            try:
-                score_tmp = (float(line[-1]) - 1) / 9  # normalize
-                score += score_tmp
-                cnt += 1
-            except:
-                continue
-        score = score / cnt
-        print("number of images evaluated: ", cnt, " model score: ", score)
-
-    with open(csv_path, "a", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["score: ", score])
-
-
 def combine_frame_numeracy(input_csv, output_csv):
     score_total = 0
     cnt = 0

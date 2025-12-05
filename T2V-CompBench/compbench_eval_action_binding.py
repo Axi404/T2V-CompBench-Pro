@@ -1,7 +1,7 @@
 import argparse
 import os
 import sys
-
+import csv
 import torch
 import json
 
@@ -32,7 +32,6 @@ from utils.prompt_utils import (
 from utils.utils import (
     extract_json,
     initialize_csv,
-    model_score,
     set_seed,
     write_to_csv,
 )
@@ -276,7 +275,25 @@ def eval_model(args):
         )
 
     return csv_path
-
+def model_score(csv_path):
+    with open(csv_path, 'r') as file:
+        reader = csv.reader(file)
+        lines = list(reader)
+        score = 0
+        cnt = 0
+        for line in lines[1:]:
+            try:
+                score_tmp = (float(line[-1])-1)/9   # normalize 
+                score+=score_tmp
+                cnt+=1
+            except:
+                continue
+        score = score/cnt
+        print("number of images evaluated: ", cnt," action binding model score: ",score)
+        
+    with open(csv_path, 'a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["score: ",score]) 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

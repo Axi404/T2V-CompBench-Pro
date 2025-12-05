@@ -3,7 +3,7 @@ import json
 import os
 import re
 import sys
-
+import csv
 import torch
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -28,7 +28,7 @@ from utils.prompt_utils import (
     DYNAMIC_ATTR_PROMPT_TEMPLATE_Q2 as Q2_template,
     DYNAMIC_ATTR_PROMPT_TEMPLATE_Q3 as Q3_template,
 )
-from utils.utils import set_seed, initialize_csv, write_to_csv, model_score
+from utils.utils import set_seed, initialize_csv, write_to_csv
 from utils.video_utils import convert_video_to_frames
 
 
@@ -312,6 +312,26 @@ def eval_model(args):
 
     return csv_path
 
+def model_score(csv_path):
+    with open(csv_path, 'r') as file:
+        reader = csv.reader(file)
+        lines = list(reader)
+        score = 0
+        cnt = 0
+        for line in lines[1:]:
+            try:
+                score_tmp = float(line[-1]) 
+                score+=score_tmp
+                cnt+=1
+            except:
+                continue
+        
+        score = score/cnt
+        print("number of images evaluated: ", cnt," dynamic attribute binding model score: ",score)
+        
+    with open(csv_path, 'a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["score: ",score]) 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
