@@ -3,6 +3,6 @@ playground/results
 *.egg-info/
 __pycache__
 checkpoints/
-weights/
+weights
 **/*.pyc
 **/*.pth

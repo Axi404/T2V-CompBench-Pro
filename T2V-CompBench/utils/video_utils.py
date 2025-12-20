@@ -4,6 +4,7 @@ import torch
 import os
 from torchvision.io import write_video
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def extract_frames(video_path, num_frames=16):
     frames = []
@@ -87,47 +88,135 @@ def convert_video_to_frames(video_path, num_frames=16):
     return output_path
 
 
-def convert_video_to_standard_video(video_path, num_frames):
+def _process_single_video_to_standard(
+    v: str, video_path: str, output_path: str, num_frames: int
+) -> str:
+    """
+    Process a single video to standard format.
+    
+    Args:
+        v: video filename
+        video_path: directory containing the video
+        output_path: directory to save the standard video
+        num_frames: number of frames to extract
+    
+    Returns:
+        v_mp4: the output video filename
+    """
+    v_mp4 = v.split(".")[0] + ".mp4"
+    convert_video(
+        os.path.join(video_path, f"{v}"),
+        os.path.join(output_path, f"{v_mp4}"),
+        num_frames,
+    )
+    return v_mp4
+
+
+def convert_video_to_standard_video(
+    video_path: str, num_frames: int, max_workers: int = 8
+) -> str:
+    """
+    Convert videos to standard format using multi-threading.
+    
+    Args:
+        video_path: path to video file or directory containing videos
+        num_frames: number of frames to extract per video
+        max_workers: maximum number of threads to use
+    
+    Returns:
+        output_path: directory where standard videos are saved
+    """
     video, video_path = read_video_path(video_path)
     print("start converting video to video with 16 frames from path:", video_path)
+    print(f"using {max_workers} threads")
 
     output_path = os.path.join(
         os.path.dirname(video_path), "video_standard", os.path.basename(video_path)
     )
     os.makedirs(output_path, exist_ok=True)
 
-    for v in tqdm(video):
-        v_mp4 = v.split(".")[0] + ".mp4"
-        convert_video(
-            os.path.join(video_path, f"{v}"),
-            os.path.join(output_path, f"{v_mp4}"),
-            num_frames,
-        )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _process_single_video_to_standard, v, video_path, output_path, num_frames
+            ): v for v in video
+        }
+        
+        for future in tqdm(as_completed(futures), total=len(futures)):
+            try:
+                future.result()
+            except Exception as e:
+                v = futures[future]
+                print(f"Error processing {v}: {e}")
+
     print("finish converting from path: ", video_path)
     print("standard video stored in: ", output_path)
     return output_path
 
 
-def convert_video_to_grid(video_path, num_image=6):
+def _process_single_video_to_grid(
+    v: str, video_path: str, output_path: str, num_image: int
+) -> str:
+    """
+    Process a single video to image grid.
+    
+    Args:
+        v: video filename
+        video_path: directory containing the video
+        output_path: directory to save the grid image
+        num_image: number of frames to extract
+    
+    Returns:
+        vid_id: the video id that was processed
+    """
+    vid_id = v.split(".")[0]
+    vid_path = os.path.join(video_path, v)
+    frames = extract_frames(vid_path)
+    frame_indices = np.linspace(
+        0, len(frames) - 1, num_image, dtype=int
+    )  # take 6 from 16 evenly, 1st & last included
+    grid = [frames[i] for i in frame_indices]
+    grid_image = merge_grid(grid)
+    grid_filename = os.path.join(output_path, f"{vid_id}.png")
+    cv2.imwrite(grid_filename, grid_image)
+    return vid_id
+
+
+def convert_video_to_grid(video_path: str, num_image: int = 6, max_workers: int = 8) -> str:
+    """
+    Convert videos to image grids using multi-threading.
+    
+    Args:
+        video_path: path to video file or directory containing videos
+        num_image: number of frames to extract per video
+        max_workers: maximum number of threads to use
+    
+    Returns:
+        output_path: directory where grid images are saved
+    """
     video, video_path = read_video_path(video_path)
-    print("start converting video to image grid with 6 frames from path:", video_path)
+    print(f"start converting video to image grid with {num_image} frames from path:", video_path)
+    print(f"using {max_workers} threads")
 
     output_path = os.path.join(
         os.path.dirname(video_path), "image_grid", os.path.basename(video_path)
     )
     os.makedirs(output_path, exist_ok=True)
 
-    for v in tqdm(video):
-        vid_id = v.split(".")[0]
-        vid_path = os.path.join(video_path, v)
-        frames = extract_frames(vid_path)
-        frame_indices = np.linspace(
-            0, len(frames) - 1, num_image, dtype=int
-        )  # take 6 from 16 evenly, 1st & last included
-        grid = [frames[i] for i in frame_indices]
-        grid_image = merge_grid(grid)
-        grid_filename = os.path.join(output_path, f"{vid_id}.png")
-        cv2.imwrite(grid_filename, grid_image)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _process_single_video_to_grid, v, video_path, output_path, num_image
+            ): v for v in video
+        }
+        
+        for future in tqdm(as_completed(futures), total=len(futures)):
+            try:
+                future.result()
+            except Exception as e:
+                v = futures[future]
+                print(f"Error processing {v}: {e}")
+
     print("finish converting from path: ", video_path)
     print("image grid stored in: ", output_path)
     return output_path
