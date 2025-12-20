@@ -611,7 +611,7 @@ def background(args):
                 and file_name.split(".")[-1] == "jpg"
             ):
                 real_masks.append(file_name)
-        print(real_masks)
+        # print(real_masks)
 
         if len(real_masks) == 0:
             write_to_csv(

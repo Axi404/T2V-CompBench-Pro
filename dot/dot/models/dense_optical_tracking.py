@@ -6,19 +6,19 @@ from einops import rearrange, repeat
 
 from .optical_flow import OpticalFlow
 from .point_tracking import PointTracker
-from dot.utils.torch import get_grid
+from dot.dot.utils.torch import get_grid
 
 
 class DenseOpticalTracker(nn.Module):
     def __init__(self,
                  height=512,
                  width=512,
-                 tracker_config="configs/cotracker2_patch_4_wind_8.json",
-                 tracker_path="checkpoints/movi_f_cotracker2_patch_4_wind_8.pth",
-                 estimator_config="configs/raft_patch_8.json",
-                 estimator_path="checkpoints/cvo_raft_patch_8.pth",
-                 refiner_config="configs/raft_patch_4_alpha.json",
-                 refiner_path="checkpoints/movi_f_raft_patch_4_alpha.pth"):
+                 tracker_config="dot/configs/cotracker2_patch_4_wind_8.json",
+                 tracker_path="dot/checkpoints/movi_f_cotracker2_patch_4_wind_8.pth",
+                 estimator_config="dot/configs/raft_patch_8.json",
+                 estimator_path="dot/checkpoints/cvo_raft_patch_8.pth",
+                 refiner_config="dot/configs/raft_patch_4_alpha.json",
+                 refiner_path="dot/checkpoints/movi_f_raft_patch_4_alpha.pth"):
         super().__init__()
         self.point_tracker = PointTracker(height, width, tracker_config, tracker_path, estimator_config, estimator_path)
         self.optical_flow_refiner = OpticalFlow(height, width, refiner_config, refiner_path)

@@ -8,14 +8,14 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
-from dot.models.shelf.cotracker_utils.models.core.cotracker.blocks import (
+from dot.dot.models.shelf.cotracker_utils.models.core.cotracker.blocks import (
     BasicEncoder,
     CorrBlock,
     UpdateFormer,
 )
 
-from dot.models.shelf.cotracker_utils.models.core.model_utils import meshgrid2d, bilinear_sample2d, smart_cat
-from dot.models.shelf.cotracker_utils.models.core.embeddings import (
+from dot.dot.models.shelf.cotracker_utils.models.core.model_utils import meshgrid2d, bilinear_sample2d, smart_cat
+from dot.dot.models.shelf.cotracker_utils.models.core.embeddings import (
     get_2d_embedding,
     get_1d_sincos_pos_embed_from_grid,
     get_2d_sincos_pos_embed,

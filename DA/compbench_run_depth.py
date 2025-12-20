@@ -19,28 +19,25 @@ from .depth_anything.util.transform import Resize, NormalizeImage, PrepareForNet
 import json
 import cv2
 from torchvision.io import write_video
+from decord import VideoReader
+from decord import cpu
+
+from concurrent.futures import ThreadPoolExecutor
 
 class Video_preprocess():
     def __init__(self):
         pass
     
     def extract_frames(self, video_path, num_frames=16):
-        frames = []
-        
-        cap = cv2.VideoCapture(video_path)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        print("total frames", total_frames)
+        vr = VideoReader(video_path, ctx=cpu(0))
+        total_frames = len(vr)
         if total_frames <= num_frames:
             frame_indices = np.arange(total_frames)
         else:
             frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
-        for i in frame_indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frames.append(frame)
-        cap.release()    
+        frames = vr.get_batch(frame_indices).asnumpy()
+        frames = [cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) for frame in frames]
+        
         return frames
 
     def rgb_to_yuv(self, frame):
@@ -82,7 +79,7 @@ class Video_preprocess():
         output_path = os.path.join(os.path.dirname(video_path), "frames", os.path.basename(video_path))
         os.makedirs(output_path, exist_ok=True)
     
-        for v in video:
+        def process_single_video(v):
             vid_id = v.split(".")[0]
             frames_dir = os.path.join(output_path, vid_id)
             os.makedirs(frames_dir, exist_ok=True)
@@ -91,6 +88,9 @@ class Video_preprocess():
             for frame_count,frame in enumerate(frames):
                 frame_filename = os.path.join(frames_dir, f'{vid_id}_{frame_count:06d}.png')
                 cv2.imwrite(frame_filename, frame)
+
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            executor.map(process_single_video, video)
         print("finish converting from path: ", video_path)
         print("video frames stored in: ", output_path)
         return output_path
@@ -102,7 +102,7 @@ class Video_preprocess():
         output_path = os.path.join(os.path.dirname(video_path), "video_standard", os.path.basename(video_path))
         os.makedirs(output_path, exist_ok=True)
         
-        for v in video:
+        for v in tqdm(video, desc="Converting to standard video"):
             v_mp4 = v.split(".")[0] + ".mp4"
             self.convert_video(os.path.join(video_path, f"{v}"), os.path.join(output_path, f"{v_mp4}"),num_frames)
         print("finish converting from path: ", video_path)
@@ -116,7 +116,7 @@ class Video_preprocess():
         output_path = os.path.join(os.path.dirname(video_path), "image_grid", os.path.basename(video_path))
         os.makedirs(output_path, exist_ok=True)
     
-        for v in video:
+        for v in tqdm(video, desc="Converting to grid"):
             vid_id = v.split(".")[0]
             vid_path = os.path.join(video_path,v)
             frames = self.extract_frames(vid_path)
@@ -169,11 +169,13 @@ def run_depth(video_path,t2v_model,output_dir,meta_file,encoder="vitl",pred_only
 
     output_dir = os.path.join(output_dir,t2v_model)
     videos = os.listdir(frame_folder)
+    # Filter out non-numeric directories (e.g., 'frames')
+    videos = [v for v in videos if v.isdigit()]
     videos.sort(key=lambda x: int(x))
     
     os.makedirs(output_dir, exist_ok=True)
     
-    for i in range(len(videos)):
+    for i in tqdm(range(len(videos)), desc="Depth Estimation"):
         vid = videos[i]
         images = os.listdir(os.path.join(frame_folder,vid))
         images.sort(key=lambda x: int(x.split('_')[-1].split('.')[0]))

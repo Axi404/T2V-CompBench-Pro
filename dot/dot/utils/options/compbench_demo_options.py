@@ -20,12 +20,12 @@ class DemoOptions(BaseOptions):
         parser.add_argument("--spaghetti_dropout", type=float, default=0)
         parser.set_defaults(data_root="datasets/demo", name="demo", batch_size=1, height=480, width=856, num_tracks=8192) #ychange:240 xchange:428
         
-        parser.add_argument("--read-prompt-file", type=str, default="../meta_data/motion_binding.json")
+        parser.add_argument("--read-prompt-file", type=str, default="playground/meta_data/motion_binding.json")
         parser.add_argument("--video-path", required=True,type=str)
-        parser.add_argument("--mask_folder", type=str, default="../output_motion_binding_seg")
+        parser.add_argument("--mask_folder", type=str, default="playground/results/output_motion_binding_seg")
         parser.add_argument("--t2v-model", type=str, required=True)
-        parser.add_argument("--output-path", default="../csv_motion_binding", type=str)
+        parser.add_argument("--output-path", default="playground/results/csv_motion_binding", type=str)
         parser.add_argument(
-            "--output_dir", "-o", type=str, default="../output_motion_binding", help="output directory"
+            "--output_dir", "-o", type=str, default="playground/results/output_motion_binding", help="output directory"
         )
         return parser

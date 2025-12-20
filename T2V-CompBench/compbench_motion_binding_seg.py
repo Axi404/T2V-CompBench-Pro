@@ -6,7 +6,8 @@ import cv2
 import json
 import matplotlib.pyplot as plt
 import torch
-
+from tqdm import tqdm
+import gc
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
@@ -91,7 +92,7 @@ def foreground_background_mask(args):
     with open(args.read_prompt_file, "r") as json_data:
         prompts = json.load(json_data)
 
-    for k in range(len(videos)):
+    for k in tqdm(range(len(videos)), desc="Processing Motion Binding Segmentation"):
 
         video_name = videos[k]
         num = int(video_name[0:4]) - 1
@@ -226,10 +227,14 @@ def foreground_background_mask(args):
             dpi=300,
             pad_inches=0.0,
         )
+        plt.close()
 
         save_mask_data(
             os.path.join(output_dir, videos[k]), masks, boxes_filt, pred_phrases
         )  # save background
+
+        gc.collect()
+        torch.cuda.empty_cache()
 
     print("standard video path: ", stardard_video_path)
 
@@ -284,8 +289,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--video-path", type=str, required=True)
     parser.add_argument("--t2v-model", type=str, required=True)
-    parser.add_argument("--total_frame", type=str, required=True)
-    parser.add_argument("--fps", type=str, required=True)
+    parser.add_argument("--total_frame", type=str, default=16, required=False)
+    parser.add_argument("--fps", type=str, default=8, required=False)
     parser.add_argument(
         "--read-prompt-file", type=str, default="playground/meta_data/motion_binding.json"
     )

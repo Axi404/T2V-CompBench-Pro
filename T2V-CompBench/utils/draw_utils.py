@@ -18,7 +18,7 @@ def plot_boxes_to_image(
     elif len(prompt_objs) == 2 and color1 is None and color2 is None:
         color1 = (255, 0, 0)
         color2 = (0, 0, 255)
-    else:
+    elif color1 is None or color2 is None:
         print("wrong objects")
 
     draw = ImageDraw.Draw(image_pil)
@@ -73,7 +73,6 @@ def plot_boxes_to_image(
         draw.ellipse((xc - s, yc - s, xc + s, yc + s), fill=color)
 
         mask_draw.rectangle([x0, y0, x1, y1], fill=255, width=6)
-
     return image_pil, mask
 
 

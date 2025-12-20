@@ -3,6 +3,8 @@ import os
 from itertools import product
 import json
 import sys
+import gc
+from tqdm import tqdm
 
 import csv
 import cv2
@@ -111,9 +113,11 @@ def visualize_pred_3d(
 ):
     if len(record_all_correct_spatial) != 0:
         color0 = np.array([150 / 255, 150 / 255, 255 / 255, 0.6])
-        show_mask(mask0.cpu().numpy(), plt.gca(), color0, random_color=False)
+        if mask0 is not None:
+            show_mask(mask0.cpu().numpy(), plt.gca(), color0, random_color=False)
         color1 = np.array([255 / 255, 150 / 255, 150 / 255, 0.6])
-        show_mask(mask1.cpu().numpy(), plt.gca(), color1, random_color=False)
+        if mask1 is not None:
+            show_mask(mask1.cpu().numpy(), plt.gca(), color1, random_color=False)
 
     plt.axis("off")
     os.makedirs(
@@ -131,6 +135,7 @@ def visualize_pred_3d(
         dpi=300,
         pad_inches=0.0,
     )
+    plt.close()
 
 
 def get_cleaned_data(all_prob, all_phrase, all_box, phrase_0, phrase_1):
@@ -175,6 +180,7 @@ def get_cleaned_data(all_prob, all_phrase, all_box, phrase_0, phrase_1):
 
 
 def spatial_2d(args):
+    torch.set_grad_enabled(False)
     config_file = args.config  # change the path of the model config file
     checkpoint_path = args.grounded_checkpoint  # change the path of the model
     output_dir = os.path.join(
@@ -201,7 +207,12 @@ def spatial_2d(args):
     videos.sort()  # sort
 
     csv_path, line_count = initialize_csv(args.output_path, args.t2v_model, "2dframe")
-    for i in range(len(videos)):
+    for i in tqdm(range(len(videos)), desc="Evaluating Spatial 2D"):
+        if i % 10 == 0:
+            gc.collect()
+            torch.cuda.empty_cache()
+            plt.close("all")
+
         video_name = videos[i]
         num = int(video_name[0:4]) - 1
 
@@ -339,6 +350,9 @@ def spatial_2d(args):
                     )
                 else:
                     score_1 = 0  # wrong spatial relationship
+                    selected_box_0 = None
+                    selected_box_1 = None
+                    selected_label = None
 
                 write_to_csv(
                     csv_path,
@@ -376,6 +390,7 @@ def spatial_2d(args):
 
 
 def spatial_3d(args):
+    torch.set_grad_enabled(False)
     # cfg
     config_file = args.config  # change the path of the model config file
     grounded_checkpoint = args.grounded_checkpoint  # change the path of the model
@@ -422,7 +437,7 @@ def spatial_3d(args):
 
     csv_path, line_count = initialize_csv(args.output_path, args.t2v_model, "3dframe")
 
-    for i in range(len(videos)):
+    for i in tqdm(range(len(videos)), desc="Evaluating Spatial 3D"):
         video_name = videos[i]
         num = int(video_name[0:4]) - 1
 
@@ -494,7 +509,6 @@ def spatial_3d(args):
 
                 H, W = size[1], size[0]
                 for k in range(boxes_filt_0.size(0)):
-                    print(boxes_filt_0[k].size())
                     boxes_filt_0[k] = boxes_filt_0[k] * torch.Tensor([W, H, W, H])
                     boxes_filt_0[k][:2] -= boxes_filt_0[k][2:] / 2
                     boxes_filt_0[k][2:] += boxes_filt_0[k][:2]
@@ -664,6 +678,8 @@ def spatial_3d(args):
 
                 else:
                     score_1 = 0
+                    mask0 = None
+                    mask1 = None
 
                 write_to_csv(
                     csv_path,
@@ -685,7 +701,6 @@ def spatial_3d(args):
                     videos[i],
                     image_name,
                 )
-
     output_csv = combine_frame_spatial_relationships(
         f"{output_path}/{args.t2v_model}_3dframe.csv",
         f"{output_path}/{args.t2v_model}_3dvideo.csv",
@@ -706,7 +721,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--grounded_checkpoint",
         type=str,
-        default="GSA/GroundingDINO/weights/groundingdino_swint_ogc.pth",
+        default="GSA/groundingdino_swint_ogc.pth",
         help="path to checkpoint file",
     )
     parser.add_argument(

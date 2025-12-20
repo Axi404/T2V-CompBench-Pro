@@ -4,8 +4,8 @@ from torch import nn
 
 from .optical_flow import OpticalFlow
 from .shelf import CoTracker, CoTracker2, CoTracker3, Tapir
-from dot.utils.io import read_config
-from dot.utils.torch import sample_points, sample_mask_points, get_grid
+from dot.dot.utils.io import read_config
+from dot.dot.utils.torch import sample_points, sample_mask_points, get_grid
 
 
 class PointTracker(nn.Module):

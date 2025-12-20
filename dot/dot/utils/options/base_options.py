@@ -34,17 +34,17 @@ class BaseOptions:
         parser.add_argument("--num_workers", type=int, default=2)
 
         # Optical flow estimator
-        parser.add_argument("--estimator_config", type=str, default="configs/raft_patch_8.json")
-        parser.add_argument("--estimator_path", type=str, default="checkpoints/cvo_raft_patch_8.pth")
+        parser.add_argument("--estimator_config", type=str, default="dot/configs/raft_patch_8.json")
+        parser.add_argument("--estimator_path", type=str, default="dot/checkpoints/cvo_raft_patch_8.pth")
         parser.add_argument("--flow_mode", type=str, default="direct", choices=["direct", "chain", "warm_start"])
 
         # Optical flow refiner
-        parser.add_argument("--refiner_config", type=str, default="configs/raft_patch_4_alpha.json")
-        parser.add_argument("--refiner_path", type=str, default="checkpoints/movi_f_raft_patch_4_alpha.pth")
+        parser.add_argument("--refiner_config", type=str, default="dot/configs/raft_patch_4_alpha.json")
+        parser.add_argument("--refiner_path", type=str, default="dot/checkpoints/movi_f_raft_patch_4_alpha.pth")
 
         # Point tracker
-        parser.add_argument("--tracker_config", type=str, default="configs/cotracker2_patch_4_wind_8.json")
-        parser.add_argument("--tracker_path", type=str, default="checkpoints/movi_f_cotracker2_patch_4_wind_8.pth")
+        parser.add_argument("--tracker_config", type=str, default="dot/configs/cotracker2_patch_4_wind_8.json")
+        parser.add_argument("--tracker_path", type=str, default="dot/checkpoints/movi_f_cotracker2_patch_4_wind_8.pth")
         parser.add_argument("--sample_mode", type=str, default="all", choices=["all", "first", "last"])
 
         # Dense optical tracker

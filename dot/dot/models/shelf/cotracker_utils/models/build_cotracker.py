@@ -6,7 +6,7 @@
 
 import torch
 
-from dot.models.shelf.cotracker_utils.models.core.cotracker.cotracker import CoTracker
+from dot.dot.models.shelf.cotracker_utils.models.core.cotracker.cotracker import CoTracker
 
 
 def build_cotracker(

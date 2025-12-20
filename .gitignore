@@ -1,7 +1,7 @@
 playground/model_output
 playground/results
 *.egg-info/
-__pycache__/
+__pycache__
 checkpoints/
 weights/
 **/*.pyc
