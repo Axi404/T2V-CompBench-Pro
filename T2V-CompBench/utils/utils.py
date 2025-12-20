@@ -57,21 +57,23 @@ def initialize_csv(output_path: str, t2v_model: str, benchmark_name: str):
             csv_writer = csv.writer(csvfile)
             if benchmark_name == "dynamic_attr":
                 csv_writer.writerow(
-                    "name",
-                    "prompt",
-                    "1_answer1",
-                    "1_answer2",
-                    "2_answer3",
-                    "2_answer1",
-                    "2_answer2",
-                    "2_answer3",
-                    "inter_answers",
-                    "score_1",
-                    "score_1_1",
-                    "score_2",
-                    "score_2_1",
-                    "flag",
-                    "Score",
+                    [
+                        "name",
+                        "prompt",
+                        "1_answer1",
+                        "1_answer2",
+                        "2_answer3",
+                        "2_answer1",
+                        "2_answer2",
+                        "2_answer3",
+                        "inter_answers",
+                        "score_1",
+                        "score_1_1",
+                        "score_2",
+                        "score_2_1",
+                        "flag",
+                        "Score",
+                    ]
                 )
             elif benchmark_name == "background" or benchmark_name == "foreground":
                 csv_writer.writerow(
@@ -377,6 +379,7 @@ def save_mask_data(output_dir, mask_list, box_list, label_list):
         dpi=300,
         pad_inches=0.0,
     )
+    plt.close()
 
     json_data = [{"value": value, "label": "background"}]
     for label, box in zip(label_list, box_list):
@@ -410,3 +413,4 @@ def save_mask_foreground(output_dir, mask, obj_prompt):
         dpi=300,
         pad_inches=0.0,
     )
+    plt.close()

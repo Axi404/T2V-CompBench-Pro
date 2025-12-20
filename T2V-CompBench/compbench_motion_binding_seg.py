@@ -171,6 +171,7 @@ def foreground_background_mask(args):
                 dpi=300,
                 pad_inches=0.0,
             )
+            plt.close()
 
             m = max(probs)
             ind = probs.index(m)

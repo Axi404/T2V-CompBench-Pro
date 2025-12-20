@@ -21,9 +21,19 @@ def load_images(image_files):
     return out
 
 
-def load_and_process_image(image_path):
-    # load image
-    image_pil = Image.open(image_path).convert("RGB")  # load image
+def load_and_process_image(image_path: str) -> tuple[Image.Image, "torch.Tensor"]:
+    """
+    Load and process an image for model input.
+    
+    Args:
+        image_path: Path to the image file.
+    
+    Returns:
+        A tuple of (PIL Image, processed tensor).
+    """
+    # Use with statement to ensure file handle is properly closed
+    with Image.open(image_path) as img:
+        image_pil = img.convert("RGB").copy()  # copy() to detach from file handle
 
     transform = Compose(
         [
