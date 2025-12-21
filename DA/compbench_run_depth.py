@@ -129,7 +129,7 @@ class Video_preprocess():
         print("image grid stored in: ", output_path)
         return output_path
 
-def run_depth(video_path,t2v_model,output_dir,meta_file,encoder="vitl",pred_only=True,grayscale=True):
+def run_depth(video_path, t2v_model, output_dir, meta_file, encoder="vitl", pred_only=True, grayscale=True, num_frames=16):
     
     margin_width = 50
     caption_height = 60
@@ -164,7 +164,7 @@ def run_depth(video_path,t2v_model,output_dir,meta_file,encoder="vitl",pred_only
         prompts = json.load(json_data)
         
     
-    frame_folder = vid_process.convert_video_to_frames(video_path)
+    frame_folder = vid_process.convert_video_to_frames(video_path, num_frames=num_frames)
     print("frame_folder: ", frame_folder)
 
     output_dir = os.path.join(output_dir,t2v_model)

@@ -133,7 +133,6 @@ def convert_video_to_frames(
     return output_path
 
 
-
 def _process_single_video_to_standard(
     v: str, video_path: str, output_path: str, num_frames: int
 ) -> str:
@@ -201,7 +200,7 @@ def convert_video_to_standard_video(
 
 
 def _process_single_video_to_grid(
-    v: str, video_path: str, output_path: str, num_image: int
+    v: str, video_path: str, output_path: str, num_image: int, split: int
 ) -> str:
     """
     Process a single video to image grid.
@@ -210,25 +209,57 @@ def _process_single_video_to_grid(
         v: video filename
         video_path: directory containing the video
         output_path: directory to save the grid image
-        num_image: number of frames to extract
+        num_image: number of frames to extract per segment
+        split: number of segments to split the video into
     
     Returns:
         vid_id: the video id that was processed
     """
     vid_id = v.split(".")[0]
     vid_path = os.path.join(video_path, v)
-    frames = extract_frames(vid_path)
-    frame_indices = np.linspace(
-        0, len(frames) - 1, num_image, dtype=int
-    )  # take 6 from 16 evenly, 1st & last included
-    grid = [frames[i] for i in frame_indices]
-    grid_image = merge_grid(grid)
-    grid_filename = os.path.join(output_path, f"{vid_id}.png")
-    cv2.imwrite(grid_filename, grid_image)
+    
+    # Read all frames from the video
+    cap = cv2.VideoCapture(vid_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    all_frames = []
+    for i in range(total_frames):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        all_frames.append(frame)
+    cap.release()
+    
+    if split == 1:
+        # Extract num_image frames evenly from all frames
+        frame_indices = np.linspace(0, len(all_frames) - 1, num_image, dtype=int)
+        grid = [all_frames[i] for i in frame_indices]
+        grid_image = merge_grid(grid)
+        grid_filename = os.path.join(output_path, f"{vid_id}.png")
+        cv2.imwrite(grid_filename, grid_image)
+    elif split >= 2:
+        # Split video into `split` segments and process each segment independently
+        frames_per_segment = len(all_frames) // split
+        for seg_idx in range(split):
+            # Calculate start and end frame indices for this segment
+            start_frame = seg_idx * frames_per_segment
+            if seg_idx == split - 1:
+                # Last segment includes remaining frames
+                end_frame = len(all_frames)
+            else:
+                end_frame = (seg_idx + 1) * frames_per_segment
+            
+            segment_frames = all_frames[start_frame:end_frame]
+            
+            # Extract num_image frames evenly from this segment
+            frame_indices = np.linspace(0, len(segment_frames) - 1, num_image, dtype=int)
+            grid = [segment_frames[i] for i in frame_indices]
+            grid_image = merge_grid(grid)
+            grid_filename = os.path.join(output_path, f"{vid_id}_{seg_idx}.png")
+            cv2.imwrite(grid_filename, grid_image)
     return vid_id
 
 
-def convert_video_to_grid(video_path: str, num_image: int = 6, max_workers: int = 8) -> str:
+def convert_video_to_grid(video_path: str, num_image: int = 6, max_workers: int = 8, split = 1) -> str:
     """
     Convert videos to image grids using multi-threading.
     
@@ -252,7 +283,7 @@ def convert_video_to_grid(video_path: str, num_image: int = 6, max_workers: int 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
-                _process_single_video_to_grid, v, video_path, output_path, num_image
+                _process_single_video_to_grid, v, video_path, output_path, num_image, split
             ): v for v in video
         }
         
