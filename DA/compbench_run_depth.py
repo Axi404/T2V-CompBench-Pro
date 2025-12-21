@@ -192,36 +192,47 @@ def run_depth(video_path,t2v_model,output_dir,meta_file,encoder="vitl",pred_only
             break
         
         if spatial in ["behind", "in front of"]:
-        
+            if pred_only:
+                os.makedirs(os.path.join(output_dir,vid),exist_ok=True)
+            
+            # Preload all images and store metadata
+            batch_size = 8  # Adjust based on GPU memory
+            batch_images = []
+            batch_meta = []  # (h, w, frame_name)
+            
             for frame in images:
-                filename  = os.path.join(frame_folder,vid,frame)
+                filename = os.path.join(frame_folder,vid,frame)
                 raw_image = cv2.imread(filename)
                 image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB) / 255.0
-                
                 h, w = image.shape[:2]
-                
                 image = transform({'image': image})['image']
-                image = torch.from_numpy(image).unsqueeze(0).to(DEVICE)
+                batch_images.append(torch.from_numpy(image))
+                batch_meta.append((h, w, frame))
+            
+            # Batch inference
+            for batch_start in range(0, len(batch_images), batch_size):
+                batch_end = min(batch_start + batch_size, len(batch_images))
+                batch_tensors = torch.stack(batch_images[batch_start:batch_end]).to(DEVICE)
                 
                 with torch.no_grad():
-                    depth = depth_anything(image)
+                    depths = depth_anything(batch_tensors)
                 
-                depth = F.interpolate(depth[None], (h, w), mode='bilinear', align_corners=False)[0, 0]
-                depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
-                
-                depth = depth.cpu().numpy().astype(np.uint8)
-                
-                if grayscale:
-                    depth = np.repeat(depth[..., np.newaxis], 3, axis=-1)
-                else:
-                    depth = cv2.applyColorMap(depth, cv2.COLORMAP_INFERNO)
-                
-                filename = os.path.basename(filename)
-                
-                if pred_only:
-                    os.makedirs(os.path.join(output_dir,vid),exist_ok=True)
-                    cv2.imwrite(os.path.join(output_dir,vid,frame), depth)
-    return frame_folder                
+                # Post-process each depth map in batch
+                for idx in range(depths.shape[0]):
+                    h, w, frame = batch_meta[batch_start + idx]
+                    depth = depths[idx]
+                    depth = F.interpolate(depth[None, None], (h, w), mode='bilinear', align_corners=False)[0, 0]
+                    depth = (depth - depth.min()) / (depth.max() - depth.min()) * 255.0
+                    depth = depth.cpu().numpy().astype(np.uint8)
+                    
+                    if grayscale:
+                        depth = np.repeat(depth[..., np.newaxis], 3, axis=-1)
+                    else:
+                        depth = cv2.applyColorMap(depth, cv2.COLORMAP_INFERNO)
+                    
+                    if pred_only:
+                        cv2.imwrite(os.path.join(output_dir,vid,frame), depth)
+    return frame_folder
                 
     
     

@@ -51,7 +51,7 @@ def eval_model(args):
         args.output_path, args.t2v_model, "dynamic_attr_score"
     )
 
-    frame_images = [f for f in os.listdir(frame_folder) if f[0].isdigit()]
+    frame_images = [f for f in frame_images if not os.path.isdir(os.path.join(frame_folder, f))]
     frame_images = sorted(frame_images)
     print("[INFO] number of images: ", len(frame_images))
 

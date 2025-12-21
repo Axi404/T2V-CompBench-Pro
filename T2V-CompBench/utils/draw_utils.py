@@ -41,6 +41,11 @@ def plot_boxes_to_image(
         elif len(prompt_objs) == 2:
             if obj == prompt_objs[1]:  # obj2
                 color = color2
+            elif obj == prompt_objs[0]:  # obj1
+                color = color1
+            else:
+                print("wrong objects")
+                color = (0, 0, 0)
         else:
             print("wrong objects")
             color = (0, 0, 0)

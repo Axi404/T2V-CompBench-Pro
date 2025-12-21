@@ -60,7 +60,7 @@ def eval_model(args):
     )
     evaluated = max(line_count - 1, 0)
 
-    grid_images = [f for f in os.listdir(image_grid_path) if f[0].isdigit()]
+    grid_images = [f for f in os.listdir(image_grid_path) if not os.path.isdir(os.path.join(image_grid_path, f))]
     grid_images = sorted(grid_images)
     print(len(grid_images))
 

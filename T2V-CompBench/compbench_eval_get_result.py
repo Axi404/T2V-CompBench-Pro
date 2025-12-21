@@ -171,6 +171,7 @@ def model_score_motion_binding(model_name):
         score = score / cnt
         score_pos = score_pos / cnt_pos
     return score
+
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
     args.add_argument("--t2v-model", type=str, required=True)

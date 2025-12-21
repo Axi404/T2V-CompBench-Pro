@@ -224,9 +224,25 @@ def spline_interpolation(x, length=10):
     return x
 
 
-def get_rainbow_colors(size):
+def get_rainbow_colors(size: int) -> torch.Tensor:
+    """
+    Generate rainbow colors for visualization.
+    
+    Args:
+        size: Number of colors to generate.
+    
+    Returns:
+        A tensor of shape (size, 3) containing RGB colors.
+    """
+    if size <= 0:
+        return torch.zeros(0, 3).float()
+    
     col_map = colormaps["jet"]
-    col_range = np.array(range(size)) / (size - 1)
+    # Avoid division by zero when size == 1
+    if size == 1:
+        col_range = np.array([0.5])
+    else:
+        col_range = np.array(range(size)) / (size - 1)
     col = torch.from_numpy(col_map(col_range)[..., :3]).float()
     col = col.view(-1, 3)
     return col
@@ -367,7 +383,8 @@ def combine_fore_back(foreground, background, output_csv):
                     try:
                         obj_net_left = float(back_x[num]) - float(fore_x)
                         obj_net_up = float(back_y[num]) - float(fore_y)
-                    except:  # back_x[num] or fore_x is ''
+                    except (ValueError, IndexError):
+                        # back_x[num] or fore_x is empty string or index out of range
                         obj_net_left = 0.0
                         obj_net_up = 0.0
                     row = foreground_lines[j + 1][:6] + [obj_net_left, obj_net_up]
@@ -413,11 +430,18 @@ def object_score(obj1_net_left, left_thresh, obj1_net_up, up_thresh, d_1):
     return correct_direction, score_tmp
 
 
-def cal_score(output_csv, score_csv):
+def cal_score(output_csv: str, score_csv: str) -> None:
+    """
+    Calculate scores from the output CSV and write to score CSV.
+    
+    Args:
+        output_csv: Path to the input CSV file.
+        score_csv: Path to the output score CSV file.
+    """
     # mid point y:240, x:428  height = 480, width = 856
     left_thresh = 0
     up_thresh = 0
-    id = []
+    vid_ids = []
     score = []
 
     with open(score_csv, "w") as score_file:
@@ -429,7 +453,7 @@ def cal_score(output_csv, score_csv):
             lines = list(reader1)
             vid_num = (len(lines) - 1) // 2
             for i in range(vid_num):
-                id = lines[i * 2 + 1][0]
+                vid_id = lines[i * 2 + 1][0]
                 d_1 = lines[i * 2 + 1][3]
                 d_2 = lines[i * 2 + 2][5]
                 obj1 = lines[i * 2 + 1][2]
@@ -493,17 +517,27 @@ def cal_score(output_csv, score_csv):
                     print("wrong record in d_1 or d_2")
 
                 score.append(score_tmp)
-                writer.writerow([id, obj1, d_1, obj2, d_2, score_tmp])
+                writer.writerow([vid_id, obj1, d_1, obj2, d_2, score_tmp])
 
 
-def model_score(csv_path):
+def model_score(csv_path: str) -> None:
+    """
+    Calculate and update model scores in the CSV file.
+    
+    Args:
+        csv_path: Path to the CSV file to process.
+    """
     new_csv = []
     with open(csv_path, "r") as file:
         reader = csv.reader(file)
         lines = list(reader)
-        score = (
-            0  # neither detected: -1, detected: motion score 0~1, total scale: -1 ~ 1
-        )
+        
+        # Check if CSV has data rows
+        if len(lines) <= 1:
+            print("Warning: CSV file is empty or has only header, skipping model_score")
+            return
+        
+        score = 0  # neither detected: -1, detected: motion score 0~1, total scale: -1 ~ 1
         cnt = 0
         score_pos = 0
         cnt_pos = 0
@@ -514,7 +548,6 @@ def model_score(csv_path):
         new_csv.append(new_header)
 
         for line in lines[1:]:
-
             score_tmp = float(line[-1])
 
             if score_tmp < 0:
@@ -525,18 +558,24 @@ def model_score(csv_path):
                 cnt_pos += 1
 
             new_line = line
-            # The above code is a Python comment. Comments in Python start with a hash symbol (#) and
-            # are used to provide explanations or notes within the code. In this case, the comment is
-            # indicating that the code is creating a new line.
             new_line.append(score_tmp)
             new_csv.append(new_line)
 
             score += score_tmp
-
             cnt += 1
 
-        score = score / cnt
-        score_pos = score_pos / cnt_pos
+        # Avoid division by zero
+        if cnt == 0:
+            print("Warning: No data rows found, cannot calculate score")
+            score = 0.0
+        else:
+            score = score / cnt
+        
+        if cnt_pos == 0:
+            score_pos = 0.0
+        else:
+            score_pos = score_pos / cnt_pos
+        
         print("score: ", score)
 
     with open(csv_path, "w", newline="") as file:
@@ -545,7 +584,17 @@ def model_score(csv_path):
         writer.writerow(["score: ", score])
 
 
-def background(args):
+def background(args, model=None):
+    """
+    Process background masks for motion binding evaluation.
+    
+    Args:
+        args: Command line arguments.
+        model: Optional pre-loaded model to avoid duplicate loading.
+    
+    Returns:
+        Path to the background CSV file.
+    """
     output_dir = os.path.join(args.output_dir, args.t2v_model)
     output_path = args.output_path
     video_folder = args.video_path
@@ -557,12 +606,15 @@ def background(args):
     with open(args.read_prompt_file, "r") as json_data:
         prompts = json.load(json_data)
 
-    model = create_model(args).cuda()
+    # Use provided model or create a new one
+    if model is None:
+        model = create_model(args).cuda()
     resolution = (args.height, args.width)
 
     csv_path, line_count = initialize_csv(output_path, args.t2v_model, "background")
 
     videos = os.listdir(video_folder)
+    videos = [v for v in videos if not os.path.isdir(os.path.join(video_folder, v))]
     videos.sort(key=lambda x: int(x.split(".")[0]))
 
     evaluated = max(line_count - 1, 0)
@@ -600,6 +652,8 @@ def background(args):
             tracks = pred["tracks"][0]
             if args.save_tracks:
                 torch.save(tracks.cpu(), tracks_path)
+            # Clean up prediction to free memory
+            del pred
         else:
             tracks = torch.load(tracks_path)
 
@@ -661,19 +715,26 @@ def background(args):
                     data, mode=mode, args=args
                 )
 
-            for cnt in range(len(x_change_list)):
-                last_x = x_change_list[-(cnt + 1)]
-                last_y = y_change_list[-(cnt + 1)]
-                if (last_x == -10000 and last_y != -10000) or (
-                    last_y == -10000 and last_x != -10000
-                ):
-                    print("NO WAY")
-                    break
-                if last_x != -10000 or last_y != -10000:
-                    print("last? ", -(cnt + 1))
-                    break
-            change_in_x = last_x - x_change_list[0]
-            change_in_y = last_y - y_change_list[0]
+            # Find the last valid x and y changes (not -10000)
+            last_x = -10000
+            last_y = -10000
+            if len(x_change_list) > 0:
+                for cnt in range(len(x_change_list)):
+                    last_x = x_change_list[-(cnt + 1)]
+                    last_y = y_change_list[-(cnt + 1)]
+                    if (last_x == -10000 and last_y != -10000) or (
+                        last_y == -10000 and last_x != -10000
+                    ):
+                        print("NO WAY")
+                        break
+                    if last_x != -10000 or last_y != -10000:
+                        print("last? ", -(cnt + 1))
+                        break
+                change_in_x = last_x - x_change_list[0]
+                change_in_y = last_y - y_change_list[0]
+            else:
+                change_in_x = 0
+                change_in_y = 0
 
             xy_json = {
                 "x_change_list": x_change_list,
@@ -696,11 +757,26 @@ def background(args):
                 change_in_x=change_in_x,
                 change_in_y=change_in_y,
             )
+        
+        # Clean up GPU memory after each video
+        del video, tracks, data
+        torch.cuda.empty_cache()
+    
     background_csv = f"{output_path}/{args.t2v_model}_background.csv"
     return background_csv
 
 
-def foreground(args):
+def foreground(args, model=None):
+    """
+    Process foreground masks for motion binding evaluation.
+    
+    Args:
+        args: Command line arguments.
+        model: Optional pre-loaded model to avoid duplicate loading.
+    
+    Returns:
+        Path to the foreground CSV file.
+    """
     output_dir = os.path.join(args.output_dir, args.t2v_model)
     output_path = args.output_path
     video_folder = args.video_path
@@ -712,12 +788,15 @@ def foreground(args):
     with open(args.read_prompt_file, "r") as json_data:
         prompts = json.load(json_data)
 
-    model = create_model(args).cuda()
+    # Use provided model or create a new one
+    if model is None:
+        model = create_model(args).cuda()
     resolution = (args.height, args.width)
 
     csv_path, line_count = initialize_csv(output_path, args.t2v_model, "foreground")
 
     videos = os.listdir(video_folder)
+    videos = [v for v in videos if not os.path.isdir(os.path.join(video_folder, v))]
     videos.sort(key=lambda x: int(x.split(".")[0]))
 
     evaluated = max(line_count - 1, 0)
@@ -740,9 +819,12 @@ def foreground(args):
         masks = os.listdir(osp.join(mask_folder, vid.split(".")[0]))
         real_masks = []
         for file_name in masks:
+            # Safely check filename format to avoid IndexError
+            parts = file_name.split("_")
             if (
                 file_name.split(".")[-1] == "jpg"
-                and file_name.split("_")[1] == "foreground"
+                and len(parts) >= 2
+                and parts[1] == "foreground"
             ):
                 real_masks.append(file_name)
 
@@ -778,30 +860,33 @@ def foreground(args):
                     change_in_y="",
                 )
             continue
+        
+        # Move video loading and tracks computation outside the mask loop
+        save_prefix = osp.join(output_dir, vid.split(".")[0])
+        os.makedirs(save_prefix, exist_ok=True)
+        args.result_path = save_prefix
+        tracks_path = osp.join(args.result_path, "tracks.pth")
+
+        video = read_video(
+            osp.join(video_folder, vid), resolution=resolution
+        ).cuda()
+
+        if not osp.exists(tracks_path) or args.recompute_tracks:
+            with torch.no_grad():
+                pred = model(
+                    {"video": video[None]},
+                    mode=args.inference_mode,
+                    **vars(args),
+                )
+            tracks = pred["tracks"][0]
+            if args.save_tracks:
+                torch.save(tracks.cpu(), tracks_path)
+            # Clean up prediction to free memory
+            del pred
+        else:
+            tracks = torch.load(tracks_path)
+
         for mask_name in real_masks:
-            save_prefix = osp.join(output_dir, vid.split(".")[0])
-            os.makedirs(save_prefix, exist_ok=True)
-
-            args.result_path = save_prefix
-            tracks_path = osp.join(args.result_path, "tracks.pth")
-
-            video = read_video(
-                osp.join(video_folder, vid), resolution=resolution
-            ).cuda()  # , time_steps=20
-
-            if not osp.exists(tracks_path) or args.recompute_tracks:
-                with torch.no_grad():
-                    pred = model(
-                        {"video": video[None]},
-                        mode=args.inference_mode,
-                        **vars(args),
-                    )
-                tracks = pred["tracks"][0]
-                if args.save_tracks:
-                    torch.save(tracks.cpu(), tracks_path)
-            else:
-                tracks = torch.load(tracks_path)
-
             mask_path = osp.join(mask_folder, vid.split(".")[0], mask_name)
             if any(
                 ["mask" in mode] for mode in args.visualization_modes
@@ -810,7 +895,7 @@ def foreground(args):
             else:
                 mask = torch.ones(args.height, args.width).bool()
 
-            data = {"video": video, "tracks": tracks, "mask": mask}
+            data = {"video": video.clone(), "tracks": tracks.clone(), "mask": mask}
 
             data = to_device(data, "cuda")
 
@@ -829,23 +914,30 @@ def foreground(args):
                 data["tracks"] = data["tracks"][:, order]
 
             for mode in args.visualization_modes:
-                video, x_change_list, y_change_list = forward(
+                output_video, x_change_list, y_change_list = forward(
                     data, mode=mode, args=args
                 )
 
-            for cnt in range(len(x_change_list)):
-                last_x = x_change_list[-(cnt + 1)]
-                last_y = y_change_list[-(cnt + 1)]
-                if (last_x == -10000 and last_y != -10000) or (
-                    last_y == -10000 and last_x != -10000
-                ):
-                    print("NO WAY")
-                    break
-                if last_x != -10000 or last_y != -10000:
-                    print("last? ", -(cnt + 1))
-                    break
-            change_in_x = last_x - x_change_list[0]
-            change_in_y = last_y - y_change_list[0]
+            # Find the last valid x and y changes (not -10000)
+            last_x = -10000
+            last_y = -10000
+            if len(x_change_list) > 0:
+                for cnt in range(len(x_change_list)):
+                    last_x = x_change_list[-(cnt + 1)]
+                    last_y = y_change_list[-(cnt + 1)]
+                    if (last_x == -10000 and last_y != -10000) or (
+                        last_y == -10000 and last_x != -10000
+                    ):
+                        print("NO WAY")
+                        break
+                    if last_x != -10000 or last_y != -10000:
+                        print("last? ", -(cnt + 1))
+                        break
+                change_in_x = last_x - x_change_list[0]
+                change_in_y = last_y - y_change_list[0]
+            else:
+                change_in_x = 0
+                change_in_y = 0
 
             xy_json = {
                 "x_change_list": x_change_list,
@@ -853,7 +945,7 @@ def foreground(args):
             }
 
             save_path = osp.join(save_prefix, mask_name.split(".")[0] + ".mp4")
-            write_video(video, save_path)
+            write_video(output_video, save_path)
             write_to_csv(
                 csv_path,
                 "foreground",
@@ -868,6 +960,13 @@ def foreground(args):
                 change_in_x=change_in_x,
                 change_in_y=change_in_y,
             )
+            
+            # Clean up data after each mask
+            del data
+        
+        # Clean up GPU memory after each video
+        del video, tracks
+        torch.cuda.empty_cache()
 
     foreground_csv = f"{output_path}/{args.t2v_model}_foreground.csv"
     return foreground_csv
@@ -876,8 +975,16 @@ def foreground(args):
 if __name__ == "__main__":
     args = DemoOptions().parse_args()
 
-    foreground_csv = foreground(args)
-    background_csv = background(args)
+    # Load model only once and share between foreground and background
+    print("Loading model...")
+    model = create_model(args).cuda()
+    
+    foreground_csv = foreground(args, model=model)
+    background_csv = background(args, model=model)
+    
+    # Clean up model after processing
+    del model
+    torch.cuda.empty_cache()
 
     output_csv = os.path.join(
         args.output_path, f"{args.t2v_model}_motion_back_fore.csv"

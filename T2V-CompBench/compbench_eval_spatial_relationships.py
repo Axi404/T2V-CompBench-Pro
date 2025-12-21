@@ -48,7 +48,18 @@ from utils.grounding_utils import get_grounding_output
 sys.path.append("./DA")
 
 
-def load_model(model_config_path, model_checkpoint_path, device):
+def load_model(model_config_path: str, model_checkpoint_path: str, device: str) -> torch.nn.Module:
+    """
+    Load and initialize the grounding model.
+    
+    Args:
+        model_config_path: Path to model config file.
+        model_checkpoint_path: Path to model checkpoint.
+        device: Device to load model on ('cuda' or 'cpu').
+    
+    Returns:
+        Loaded model on specified device.
+    """
     args = SLConfig.fromfile(model_config_path)
     args.device = device
     model = build_model(args)
@@ -58,6 +69,8 @@ def load_model(model_config_path, model_checkpoint_path, device):
     )
     print(load_res)
     _ = model.eval()
+    # Move model to device once during loading, avoid repeated .to(device) calls
+    model = model.to(device)
     return model
 
 
@@ -204,6 +217,7 @@ def spatial_2d(args):
 
     frame_folder = args.frame_folder
     videos = os.listdir(frame_folder)
+    videos = [v for v in videos if not os.path.isdir(os.path.join(frame_folder, v))]
     videos.sort()  # sort
 
     csv_path, line_count = initialize_csv(args.output_path, args.t2v_model, "2dframe")
@@ -232,7 +246,7 @@ def spatial_2d(args):
             "behind",
         ]:
             print(spatial, "spatial not included!!!, index: ", videos[i])
-            break
+            continue
 
         if spatial in ["left", "right", "above", "on", "under", "below"]:
             os.makedirs(os.path.join(output_dir, videos[i]), exist_ok=True)
@@ -433,6 +447,7 @@ def spatial_3d(args):
 
     frame_folder = args.frame_folder
     videos = os.listdir(frame_folder)
+    videos = [v for v in videos if not os.path.isdir(os.path.join(frame_folder, v))]
     videos.sort()  # sort
 
     csv_path, line_count = initialize_csv(args.output_path, args.t2v_model, "3dframe")
@@ -592,7 +607,11 @@ def spatial_3d(args):
                         obj1_seg = cv2.bitwise_and(
                             depth_map, depth_map, mask=mask_image_0
                         )
-                        d1 = np.sum(obj1_seg) / cv2.countNonZero(mask_image_0)
+                        non_zero_0 = cv2.countNonZero(mask_image_0)
+                        if non_zero_0 == 0:
+                            d1 = 0
+                        else:
+                            d1 = np.sum(obj1_seg) / non_zero_0
 
                         mask_image_1 = (
                             masks_1[jj].cpu().numpy().squeeze() * 255
@@ -600,7 +619,11 @@ def spatial_3d(args):
                         obj2_seg = cv2.bitwise_and(
                             depth_map, depth_map, mask=mask_image_1
                         )
-                        d2 = np.sum(obj2_seg) / cv2.countNonZero(mask_image_1)
+                        non_zero_1 = cv2.countNonZero(mask_image_1)
+                        if non_zero_1 == 0:
+                            d2 = 0
+                        else:
+                            d2 = np.sum(obj2_seg) / non_zero_1
 
                         if (not 0 <= d1 <= 255) or (not 0 <= d2 <= 255):
                             print("d1 wrong value")

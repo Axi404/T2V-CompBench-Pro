@@ -350,12 +350,12 @@ def combine_csv_and_cal_model_score(csv_2d, csv_3d, output_file):
     lines = sorted(lines, key=lambda x: int(x[0]))  # Sort by the first element
     lines = [["id", "score_frame", "Score"]] + lines
     score = []
-    print(lines)
+    # print(lines)
     for line in lines[1:]:
         score.append(float(line[-1]))
 
     score = sum(score) / len(score)
-
+    print(f"Score: {score}")
     with open(output_file, "w") as outfile:
         writer = csv.writer(outfile)
         writer.writerows(lines)
