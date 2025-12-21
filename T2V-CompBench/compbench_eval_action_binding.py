@@ -4,6 +4,7 @@ import sys
 import csv
 import torch
 import json
+from tqdm import tqdm
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -38,6 +39,175 @@ from utils.utils import (
 from utils.video_utils import convert_video_to_grid
 
 
+def run_action_binding_conversation(
+    model,
+    tokenizer,
+    images_tensor: torch.Tensor,
+    image_sizes: list,
+    Q1: str,
+    Q2: str,
+    Q3_A: str,
+    Q3_B: str,
+    Q3_C: str,
+    args,
+    image_name: str = "",
+) -> tuple[str, str, str, int | str]:
+    """
+    Run a single iteration of the action binding multi-turn conversation.
+
+    Args:
+        model: The LLaVA model
+        tokenizer: The tokenizer
+        images_tensor: Processed image tensor
+        image_sizes: List of image sizes
+        Q1: First question prompt
+        Q2: Second question prompt
+        Q3_A: Third question prompt (option A)
+        Q3_B: Third question prompt (option B)
+        Q3_C: Third question prompt (option C)
+        args: Arguments containing temperature, top_p, num_beams, max_new_tokens
+        image_name: Image name for logging
+
+    Returns:
+        tuple: (output_1, output_2, output_3, score_tmp)
+    """
+    # conversation 1
+    conv = conv_templates["chatml_direct"].copy()
+    conv.append_message(conv.roles[0], Q1)
+    conv.append_message(conv.roles[1], None)
+    with torch.inference_mode():
+        output_ids = model.generate(
+            tokenizer_image_token(
+                conv.get_prompt(),
+                tokenizer,
+                IMAGE_TOKEN_INDEX,
+                return_tensors="pt",
+            )
+            .unsqueeze(0)
+            .cuda(),
+            images=images_tensor,
+            image_sizes=image_sizes,
+            do_sample=True if args.temperature > 0 else False,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            num_beams=args.num_beams,
+            max_new_tokens=args.max_new_tokens,
+            use_cache=True,
+        )
+    output_1 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+    conv.messages[-1][-1] = output_1
+
+    # conversation 2
+    conv.append_message(conv.roles[0], Q2)
+    conv.append_message(conv.roles[1], None)
+    with torch.inference_mode():
+        output_ids = model.generate(
+            tokenizer_image_token(
+                conv.get_prompt(),
+                tokenizer,
+                IMAGE_TOKEN_INDEX,
+                return_tensors="pt",
+            )
+            .unsqueeze(0)
+            .cuda(),
+            images=images_tensor,
+            image_sizes=image_sizes,
+            do_sample=True if args.temperature > 0 else False,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            num_beams=args.num_beams,
+            max_new_tokens=args.max_new_tokens,
+            use_cache=True,
+        )
+    output_2 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+    conv.messages[-1][-1] = output_2
+
+    # parse model output
+    json_obj_2 = extract_json(output_2)
+    try:
+        option_value_2 = json_obj_2["adjust"]
+    except:
+        option_value_2 = "bad reply 1"
+
+    # whether to ask question 3
+    if option_value_2 == "A":
+        Q3 = Q3_A
+        ask_Q3 = True
+    elif option_value_2 == "B":
+        Q3 = Q3_B
+        ask_Q3 = True
+    elif option_value_2 == "C":
+        Q3 = Q3_C
+        ask_Q3 = True
+    elif option_value_2 == "D":
+        score_tmp = 1
+        ask_Q3 = False
+    else:
+        ask_Q3 = False
+        score_tmp = "bad reply"
+
+    if not ask_Q3:
+        return output_1, output_2, "", score_tmp
+
+    # conversation 3
+    conv.append_message(conv.roles[0], Q3)
+    conv.append_message(conv.roles[1], None)
+    with torch.inference_mode():
+        output_ids = model.generate(
+            tokenizer_image_token(
+                conv.get_prompt(),
+                tokenizer,
+                IMAGE_TOKEN_INDEX,
+                return_tensors="pt",
+            )
+            .unsqueeze(0)
+            .cuda(),
+            images=images_tensor,
+            image_sizes=image_sizes,
+            do_sample=True if args.temperature > 0 else False,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            num_beams=args.num_beams,
+            max_new_tokens=args.max_new_tokens,
+            use_cache=True,
+        )
+    output_3 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+
+    # parse model output
+    adjust_values = []
+    for line in output_3.splitlines():
+        if '"adjust":' in line:
+            # Extract the value after "adjust:"
+            value = line.split(":")[1].strip().strip('",')
+            adjust_values.append(value)
+    option_value_3 = ",".join(adjust_values)
+
+    # calculate score based on option_value_3
+    if option_value_3 in ["A1,A2", "A2,A1"]:
+        score_tmp = 10
+    elif option_value_3 in ["A1,B2", "B1,A2", "A2,B1", "B2,A1"]:
+        score_tmp = 9
+    elif option_value_3 in ["A1,C2", "C1,A2", "A2,C1", "C2,A1"]:
+        score_tmp = 8
+    elif option_value_3 in ["B1,B2", "B2,B1"]:
+        score_tmp = 7
+    elif option_value_3 in ["B1,C2", "C1,B2", "B2,C1", "C2,B1"]:
+        score_tmp = 6
+    elif option_value_3 in ["C1,C2", "C2,C1"]:
+        score_tmp = 5
+    elif option_value_3 in ["A"]:
+        score_tmp = 4
+    elif option_value_3 in ["B"]:
+        score_tmp = 3
+    elif option_value_3 in ["C"]:
+        score_tmp = 2
+    else:
+        score_tmp = "bad reply ?"
+        print("reply wrong format")
+
+    return output_1, output_2, output_3, score_tmp
+
+
 def eval_model(args):
     # preprocess: video 2 grid
     image_grid_path = args.image_grid_path
@@ -64,7 +234,7 @@ def eval_model(args):
 
     evaluated = max(line_count - 1, 0)
 
-    for i in range(evaluated, len(grid_images)):
+    for i in tqdm(range(evaluated, len(grid_images)), desc="Evaluating samples"):
         # get image name
         grid_image_name = grid_images[i]
         num = int(grid_image_name[0:4]) - 1
@@ -104,155 +274,25 @@ def eval_model(args):
             # set seed
             set_seed(args.seed + iteration)
 
-            # conversation 1
-            conv = conv_templates["chatml_direct"].copy()
-            conv.append_message(conv.roles[0], Q1)
-            conv.append_message(conv.roles[1], None)
-            with torch.inference_mode():
-                output_ids = model.generate(
-                    tokenizer_image_token(
-                        conv.get_prompt(),
-                        tokenizer,
-                        IMAGE_TOKEN_INDEX,
-                        return_tensors="pt",
-                    )
-                    .unsqueeze(0)
-                    .cuda(),
-                    images=images_tensor,
-                    image_sizes=image_sizes,
-                    do_sample=True if args.temperature > 0 else False,
-                    temperature=args.temperature,
-                    top_p=args.top_p,
-                    num_beams=args.num_beams,  # 1
-                    max_new_tokens=args.max_new_tokens,  # 512
-                    use_cache=True,
-                )
-            output_1 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                0
-            ].strip()
+            # run multi-turn conversation
+            output_1, output_2, output_3, score_tmp = run_action_binding_conversation(
+                model=model,
+                tokenizer=tokenizer,
+                images_tensor=images_tensor,
+                image_sizes=image_sizes,
+                Q1=Q1,
+                Q2=Q2,
+                Q3_A=Q3_A,
+                Q3_B=Q3_B,
+                Q3_C=Q3_C,
+                args=args,
+                image_name=grid_images[i],
+            )
             outputs_1.append(output_1)
-            conv.messages[-1][-1] = output_1
-
-            # conversation 2
-            conv.append_message(conv.roles[0], Q2)
-            conv.append_message(conv.roles[1], None)
-            with torch.inference_mode():
-                output_ids = model.generate(
-                    tokenizer_image_token(
-                        conv.get_prompt(),
-                        tokenizer,
-                        IMAGE_TOKEN_INDEX,
-                        return_tensors="pt",
-                    )
-                    .unsqueeze(0)
-                    .cuda(),
-                    images=images_tensor,
-                    image_sizes=image_sizes,
-                    do_sample=True if args.temperature > 0 else False,
-                    temperature=args.temperature,  # 0.2
-                    top_p=args.top_p,
-                    num_beams=args.num_beams,  # 1
-                    max_new_tokens=args.max_new_tokens,  # 512
-                    use_cache=True,
-                )
-            output_2 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                0
-            ].strip()
             outputs_2.append(output_2)
-            conv.messages[-1][-1] = output_2
-
-            # parse model output
-            json_obj_2 = extract_json(output_2)
-            try:
-                option_value_2 = json_obj_2["adjust"]
-            except:
-                option_value_2 = "bad reply 1"
-            print("option_value_2 ", option_value_2)
-
-            # whether to ask question 3
-            if option_value_2 == "A":
-                Q3 = Q3_A
-                ask_Q3 = True
-            elif option_value_2 == "B":
-                Q3 = Q3_B
-                ask_Q3 = True
-            elif option_value_2 == "C":
-                Q3 = Q3_C
-                ask_Q3 = True
-            elif option_value_2 == "D":
-                score_tmp = 1
-                ask_Q3 = False
-            else:
-                ask_Q3 = False
-                score_tmp = "bad reply"
-            if not ask_Q3:
-                scores_tmp.append(score_tmp)
-                outputs_3.append("")
-                print("score for", grid_images[i], score_tmp)
-                continue
-
-            # conversation 3
-            conv.append_message(conv.roles[0], Q3)
-            conv.append_message(conv.roles[1], None)
-            with torch.inference_mode():
-                output_ids = model.generate(
-                    tokenizer_image_token(
-                        conv.get_prompt(),
-                        tokenizer,
-                        IMAGE_TOKEN_INDEX,
-                        return_tensors="pt",
-                    )
-                    .unsqueeze(0)
-                    .cuda(),
-                    images=images_tensor,
-                    image_sizes=image_sizes,
-                    do_sample=True if args.temperature > 0 else False,
-                    temperature=args.temperature,  # 0.2
-                    top_p=args.top_p,
-                    num_beams=args.num_beams,  # 1
-                    max_new_tokens=args.max_new_tokens,  # 512
-                    use_cache=True,
-                )
-            output_3 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                0
-            ].strip()
             outputs_3.append(output_3)
-
-            # parse model output
-            adjust_values = []
-            for line in output_3.splitlines():
-                if '"adjust":' in line:
-                    # Extract the value after "adjust:"
-                    value = line.split(":")[1].strip().strip('",')
-                    adjust_values.append(value)
-            option_value_3 = ",".join(adjust_values)
-            print("option_value_3 ", option_value_3)
-
-            # calculate score based on option_value_3
-            if option_value_3 in ["A1,A2", "A2,A1"]:
-                score_tmp = 10
-            elif option_value_3 in ["A1,B2", "B1,A2", "A2,B1", "B2,A1"]:
-                score_tmp = 9
-            elif option_value_3 in ["A1,C2", "C1,A2", "A2,C1", "C2,A1"]:
-                score_tmp = 8
-            elif option_value_3 in ["B1,B2", "B2,B1"]:
-                score_tmp = 7
-            elif option_value_3 in ["B1,C2", "C1,B2", "B2,C1", "C2,B1"]:
-                score_tmp = 6
-            elif option_value_3 in ["C1,C2", "C2,C1"]:
-                score_tmp = 5
-            elif option_value_3 in ["A"]:
-                score_tmp = 4
-            elif option_value_3 in ["B"]:
-                score_tmp = 3
-            elif option_value_3 in ["C"]:
-                score_tmp = 2
-            else:
-                score_tmp = "bad reply ?"
-                print("reply wrong format")
-
             scores_tmp.append(score_tmp)
-            print("score for", grid_images[i], score_tmp)
+            print(f"[{iteration}] score for {grid_images[i]}: {score_tmp}")
 
         # calculate average score
         has_bad_reply_flag = any(not isinstance(score, int) for score in scores_tmp)
@@ -275,25 +315,30 @@ def eval_model(args):
         )
 
     return csv_path
+
+
 def model_score(csv_path):
-    with open(csv_path, 'r') as file:
+    with open(csv_path, "r") as file:
         reader = csv.reader(file)
         lines = list(reader)
         score = 0
         cnt = 0
         for line in lines[1:]:
             try:
-                score_tmp = (float(line[-1])-1)/9   # normalize 
-                score+=score_tmp
-                cnt+=1
+                score_tmp = (float(line[-1]) - 1) / 9  # normalize
+                score += score_tmp
+                cnt += 1
             except:
                 continue
-        score = score/cnt
-        print("number of images evaluated: ", cnt," action binding model score: ",score)
-        
-    with open(csv_path, 'a', newline='') as file:
+        score = score / cnt
+        print(
+            "number of images evaluated: ", cnt, " action binding model score: ", score
+        )
+
+    with open(csv_path, "a", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(["score: ",score]) 
+        writer.writerow(["score: ", score])
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

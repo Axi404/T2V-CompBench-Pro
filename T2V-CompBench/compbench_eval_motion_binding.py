@@ -227,16 +227,16 @@ def spline_interpolation(x, length=10):
 def get_rainbow_colors(size: int) -> torch.Tensor:
     """
     Generate rainbow colors for visualization.
-    
+
     Args:
         size: Number of colors to generate.
-    
+
     Returns:
         A tensor of shape (size, 3) containing RGB colors.
     """
     if size <= 0:
         return torch.zeros(0, 3).float()
-    
+
     col_map = colormaps["jet"]
     # Avoid division by zero when size == 1
     if size == 1:
@@ -433,7 +433,7 @@ def object_score(obj1_net_left, left_thresh, obj1_net_up, up_thresh, d_1):
 def cal_score(output_csv: str, score_csv: str) -> None:
     """
     Calculate scores from the output CSV and write to score CSV.
-    
+
     Args:
         output_csv: Path to the input CSV file.
         score_csv: Path to the output score CSV file.
@@ -523,7 +523,7 @@ def cal_score(output_csv: str, score_csv: str) -> None:
 def model_score(csv_path: str) -> None:
     """
     Calculate and update model scores in the CSV file.
-    
+
     Args:
         csv_path: Path to the CSV file to process.
     """
@@ -531,13 +531,15 @@ def model_score(csv_path: str) -> None:
     with open(csv_path, "r") as file:
         reader = csv.reader(file)
         lines = list(reader)
-        
+
         # Check if CSV has data rows
         if len(lines) <= 1:
             print("Warning: CSV file is empty or has only header, skipping model_score")
             return
-        
-        score = 0  # neither detected: -1, detected: motion score 0~1, total scale: -1 ~ 1
+
+        score = (
+            0  # neither detected: -1, detected: motion score 0~1, total scale: -1 ~ 1
+        )
         cnt = 0
         score_pos = 0
         cnt_pos = 0
@@ -570,12 +572,12 @@ def model_score(csv_path: str) -> None:
             score = 0.0
         else:
             score = score / cnt
-        
+
         if cnt_pos == 0:
             score_pos = 0.0
         else:
             score_pos = score_pos / cnt_pos
-        
+
         print("score: ", score)
 
     with open(csv_path, "w", newline="") as file:
@@ -587,11 +589,11 @@ def model_score(csv_path: str) -> None:
 def background(args, model=None):
     """
     Process background masks for motion binding evaluation.
-    
+
     Args:
         args: Command line arguments.
         model: Optional pre-loaded model to avoid duplicate loading.
-    
+
     Returns:
         Path to the background CSV file.
     """
@@ -757,11 +759,11 @@ def background(args, model=None):
                 change_in_x=change_in_x,
                 change_in_y=change_in_y,
             )
-        
+
         # Clean up GPU memory after each video
         del video, tracks, data
         torch.cuda.empty_cache()
-    
+
     background_csv = f"{output_path}/{args.t2v_model}_background.csv"
     return background_csv
 
@@ -769,11 +771,11 @@ def background(args, model=None):
 def foreground(args, model=None):
     """
     Process foreground masks for motion binding evaluation.
-    
+
     Args:
         args: Command line arguments.
         model: Optional pre-loaded model to avoid duplicate loading.
-    
+
     Returns:
         Path to the foreground CSV file.
     """
@@ -828,7 +830,6 @@ def foreground(args, model=None):
             ):
                 real_masks.append(file_name)
 
-        print(real_masks)
         if len(real_masks) == 0 or len(real_masks) == 1:
             write_to_csv(
                 csv_path,
@@ -860,16 +861,14 @@ def foreground(args, model=None):
                     change_in_y="",
                 )
             continue
-        
+
         # Move video loading and tracks computation outside the mask loop
         save_prefix = osp.join(output_dir, vid.split(".")[0])
         os.makedirs(save_prefix, exist_ok=True)
         args.result_path = save_prefix
         tracks_path = osp.join(args.result_path, "tracks.pth")
 
-        video = read_video(
-            osp.join(video_folder, vid), resolution=resolution
-        ).cuda()
+        video = read_video(osp.join(video_folder, vid), resolution=resolution).cuda()
 
         if not osp.exists(tracks_path) or args.recompute_tracks:
             with torch.no_grad():
@@ -960,10 +959,10 @@ def foreground(args, model=None):
                 change_in_x=change_in_x,
                 change_in_y=change_in_y,
             )
-            
+
             # Clean up data after each mask
             del data
-        
+
         # Clean up GPU memory after each video
         del video, tracks
         torch.cuda.empty_cache()
@@ -978,10 +977,10 @@ if __name__ == "__main__":
     # Load model only once and share between foreground and background
     print("Loading model...")
     model = create_model(args).cuda()
-    
+
     foreground_csv = foreground(args, model=model)
     background_csv = background(args, model=model)
-    
+
     # Clean up model after processing
     del model
     torch.cuda.empty_cache()
@@ -997,8 +996,3 @@ if __name__ == "__main__":
 
     # final model score printed out and recorded in the last line of score_csv
     model_score(score_csv)
-
-    print(foreground_csv)
-    print(background_csv)
-    print(score_csv)
-    print("Done.")

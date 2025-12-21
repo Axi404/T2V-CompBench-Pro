@@ -16,7 +16,13 @@ def get_phrases_from_posmap(
 
 
 def get_grounding_output(
-    model, image, caption, box_threshold, text_threshold, with_logits=True, device="cuda"
+    model,
+    image,
+    caption,
+    box_threshold,
+    text_threshold,
+    with_logits=True,
+    device="cuda",
 ):
     caption = caption.lower()
     caption = caption.strip()

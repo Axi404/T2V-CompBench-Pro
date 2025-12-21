@@ -32,6 +32,199 @@ from utils.utils import set_seed, initialize_csv, write_to_csv
 from utils.video_utils import convert_video_to_frames
 
 
+def run_dynamic_attr_boundary_conversation(
+    model,
+    tokenizer,
+    images_tensor: torch.Tensor,
+    image_sizes: list,
+    Q1: str,
+    state_0: str,
+    state_1: str,
+    args,
+) -> tuple[str, str, str, float | str, float | str]:
+    """
+    Run conversation for boundary frames (initial or end frame).
+
+    Args:
+        model: The LLaVA model
+        tokenizer: The tokenizer
+        images_tensor: Processed image tensor
+        image_sizes: List of image sizes
+        Q1: First question prompt
+        state_0: Initial state description
+        state_1: End state description
+        args: Arguments containing temperature, top_p, num_beams, max_new_tokens
+
+    Returns:
+        tuple: (output_1, output_2_state0, output_2_state1, score_state0, score_state1)
+    """
+    # conversation 1
+    conv = conv_templates["chatml_direct"].copy()
+    conv.append_message(conv.roles[0], Q1)
+    conv.append_message(conv.roles[1], None)
+    with torch.inference_mode():
+        output_ids = model.generate(
+            tokenizer_image_token(
+                conv.get_prompt(),
+                tokenizer,
+                IMAGE_TOKEN_INDEX,
+                return_tensors="pt",
+            )
+            .unsqueeze(0)
+            .cuda(),
+            images=images_tensor,
+            image_sizes=image_sizes,
+            do_sample=True if args.temperature > 0 else False,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            num_beams=args.num_beams,
+            max_new_tokens=args.max_new_tokens,
+            use_cache=True,
+        )
+    output_1 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+    conv.messages[-1][-1] = output_1
+
+    conv.append_message(conv.roles[0], None)
+    conv.append_message(conv.roles[1], None)
+
+    outputs_2 = []
+    scores = []
+
+    for k, state in enumerate([state_0, state_1]):
+        # conversation 2
+        Q2 = Q2_template.format(question_group_tmp=state)
+        conv.messages[-2][-1] = Q2
+        with torch.inference_mode():
+            output_ids = model.generate(
+                tokenizer_image_token(
+                    conv.get_prompt(),
+                    tokenizer,
+                    IMAGE_TOKEN_INDEX,
+                    return_tensors="pt",
+                )
+                .unsqueeze(0)
+                .cuda(),
+                images=images_tensor,
+                image_sizes=image_sizes,
+                do_sample=True if args.temperature > 0 else False,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                num_beams=args.num_beams,
+                max_new_tokens=args.max_new_tokens,
+                use_cache=True,
+            )
+        output_2 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
+            0
+        ].strip()
+        outputs_2.append(output_2)
+
+        # get score from outputs
+        pattern = r'"score":\s*"([A-D])"'
+        match = re.search(pattern, output_2)
+        if match:
+            score_tmp = match.group(1)
+        else:
+            score_tmp = "bad reply"
+            print("No score found")
+        if score_tmp == "A":
+            score_tmp = 1.0
+        elif score_tmp == "B":
+            score_tmp = 0.8
+        elif score_tmp == "C":
+            score_tmp = 0.2
+        elif score_tmp == "D":
+            score_tmp = 0.0
+        scores.append(score_tmp)
+
+    return output_1, outputs_2[0], outputs_2[1], scores[0], scores[1]
+
+
+def run_dynamic_attr_intermediate_conversation(
+    model,
+    tokenizer,
+    images_tensor: torch.Tensor,
+    image_sizes: list,
+    Q1: str,
+    Q3: str,
+    args,
+) -> tuple[str, str, float]:
+    """
+    Run conversation for intermediate frames.
+
+    Args:
+        model: The LLaVA model
+        tokenizer: The tokenizer
+        images_tensor: Processed image tensor
+        image_sizes: List of image sizes
+        Q1: First question prompt
+        Q3: Third question prompt for intermediate state
+        args: Arguments containing temperature, top_p, num_beams, max_new_tokens
+
+    Returns:
+        tuple: (output_1, output_3, score)
+    """
+    # conversation 1
+    conv = conv_templates["chatml_direct"].copy()
+    conv.append_message(conv.roles[0], Q1)
+    conv.append_message(conv.roles[1], None)
+    with torch.inference_mode():
+        output_ids = model.generate(
+            tokenizer_image_token(
+                conv.get_prompt(),
+                tokenizer,
+                IMAGE_TOKEN_INDEX,
+                return_tensors="pt",
+            )
+            .unsqueeze(0)
+            .cuda(),
+            images=images_tensor,
+            image_sizes=image_sizes,
+            do_sample=True if args.temperature > 0 else False,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            num_beams=args.num_beams,
+            max_new_tokens=args.max_new_tokens,
+            use_cache=True,
+        )
+    output_1 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+    conv.messages[-1][-1] = output_1
+
+    # conversation 3
+    conv.append_message(conv.roles[0], Q3)
+    conv.append_message(conv.roles[1], None)
+    with torch.inference_mode():
+        output_ids = model.generate(
+            tokenizer_image_token(
+                conv.get_prompt(),
+                tokenizer,
+                IMAGE_TOKEN_INDEX,
+                return_tensors="pt",
+            )
+            .unsqueeze(0)
+            .cuda(),
+            images=images_tensor,
+            image_sizes=image_sizes,
+            do_sample=True if args.temperature > 0 else False,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            num_beams=args.num_beams,
+            max_new_tokens=args.max_new_tokens,
+            use_cache=True,
+        )
+    output_3 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+
+    # get score from outputs
+    pattern = r'"score":\s*(\d+(\.\d+)?),'
+    match = re.search(pattern, output_3)
+    if match:
+        score_tmp = float(match.group(1))
+    else:
+        score_tmp = -1
+        print("No score found")
+
+    return output_1, output_3, score_tmp
+
+
 def eval_model(args):
     frame_folder = args.frame_folder
     if frame_folder == None:
@@ -51,7 +244,9 @@ def eval_model(args):
         args.output_path, args.t2v_model, "dynamic_attr_score"
     )
 
-    frame_images = [f for f in frame_images if not os.path.isdir(os.path.join(frame_folder, f))]
+    frame_images = [
+        f for f in frame_images if not os.path.isdir(os.path.join(frame_folder, f))
+    ]
     frame_images = sorted(frame_images)
     print("[INFO] number of images: ", len(frame_images))
 
@@ -94,85 +289,24 @@ def eval_model(args):
                 model.device, dtype=torch.float16
             )
 
-            # conversation 1
-            conv = conv_templates["chatml_direct"].copy()
-            conv.append_message(conv.roles[0], Q1)
-            conv.append_message(conv.roles[1], None)
-            with torch.inference_mode():
-                output_ids = model.generate(
-                    tokenizer_image_token(
-                        conv.get_prompt(),
-                        tokenizer,
-                        IMAGE_TOKEN_INDEX,
-                        return_tensors="pt",
-                    )
-                    .unsqueeze(0)
-                    .cuda(),
-                    images=images_tensor,
+            # run boundary conversation
+            output_1, output_2_s0, output_2_s1, score_s0, score_s1 = (
+                run_dynamic_attr_boundary_conversation(
+                    model=model,
+                    tokenizer=tokenizer,
+                    images_tensor=images_tensor,
                     image_sizes=image_sizes,
-                    do_sample=True if args.temperature > 0 else False,
-                    temperature=args.temperature,  # 0.2
-                    top_p=args.top_p,
-                    num_beams=args.num_beams,  # 1
-                    max_new_tokens=args.max_new_tokens,  # 512
-                    use_cache=True,
+                    Q1=Q1,
+                    state_0=state_0,
+                    state_1=state_1,
+                    args=args,
                 )
-            outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                0
-            ].strip()
-            out.append(outputs)  # out[0]: 1_answer1. out[3]: 2_answer1
-            conv.messages[-1][-1] = outputs
-
-            conv.append_message(conv.roles[0], None)
-            conv.append_message(conv.roles[1], None)
-
-            for k in range(2):
-                # conversation 2
-                Q2 = Q2_template.format(
-                    question_group_tmp=state_0 if k == 0 else state_1
-                )
-                conv.messages[-2][-1] = Q2
-                with torch.inference_mode():
-                    output_ids = model.generate(
-                        tokenizer_image_token(
-                            conv.get_prompt(),
-                            tokenizer,
-                            IMAGE_TOKEN_INDEX,
-                            return_tensors="pt",
-                        )
-                        .unsqueeze(0)
-                        .cuda(),
-                        images=images_tensor,
-                        image_sizes=image_sizes,
-                        do_sample=True if args.temperature > 0 else False,
-                        temperature=args.temperature,
-                        top_p=args.top_p,
-                        num_beams=args.num_beams,
-                        max_new_tokens=args.max_new_tokens,
-                        use_cache=True,
-                    )
-                outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                    0
-                ].strip()
-                out.append(outputs)
-
-                # get score from outputs
-                pattern = r'"score":\s*"([A-D])"'
-                match = re.search(pattern, outputs)
-                if match:
-                    score_tmp = match.group(1)
-                else:
-                    score_tmp = "bad reply"
-                    print("No score found")
-                if score_tmp == "A":
-                    score_tmp = 1.0
-                elif score_tmp == "B":
-                    score_tmp = 0.8
-                elif score_tmp == "C":
-                    score_tmp = 0.2
-                elif score_tmp == "D":
-                    score_tmp = 0.0
-                score.append(score_tmp)
+            )
+            out.append(output_1)
+            out.append(output_2_s0)
+            out.append(output_2_s1)
+            score.append(score_s0)
+            score.append(score_s1)
 
         score_1_0 = score[0]
         score_1_1 = score[1]
@@ -220,72 +354,21 @@ def eval_model(args):
                 model.device, dtype=torch.float16
             )
 
-            # conversation 1
-            conv = conv_templates["chatml_direct"].copy()
-            conv.append_message(conv.roles[0], Q1)
-            conv.append_message(conv.roles[1], None)
-            with torch.inference_mode():
-                output_ids = model.generate(
-                    tokenizer_image_token(
-                        conv.get_prompt(),
-                        tokenizer,
-                        IMAGE_TOKEN_INDEX,
-                        return_tensors="pt",
-                    )
-                    .unsqueeze(0)
-                    .cuda(),
-                    images=images_tensor,
-                    image_sizes=image_sizes,
-                    do_sample=True if args.temperature > 0 else False,
-                    temperature=args.temperature,  # 0.2
-                    top_p=args.top_p,
-                    num_beams=args.num_beams,  # 1
-                    max_new_tokens=args.max_new_tokens,  # 512
-                    use_cache=True,
-                )
-            outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                0
-            ].strip()
-            out.append(outputs)  # out[6] out[8]
-            conv.messages[-1][-1] = outputs
-
-            # conversation 3
+            # run intermediate conversation
             Q3 = Q3_template.format(phrase_0=state_0, phrase_1=state_1)
-            conv.append_message(conv.roles[0], Q3)
-            conv.append_message(conv.roles[1], None)
-            with torch.inference_mode():
-                output_ids = model.generate(
-                    tokenizer_image_token(
-                        conv.get_prompt(),
-                        tokenizer,
-                        IMAGE_TOKEN_INDEX,
-                        return_tensors="pt",
-                    )
-                    .unsqueeze(0)
-                    .cuda(),
-                    images=images_tensor,
-                    image_sizes=image_sizes,
-                    do_sample=True if args.temperature > 0 else False,
-                    temperature=args.temperature,
-                    top_p=args.top_p,
-                    num_beams=args.num_beams,
-                    max_new_tokens=args.max_new_tokens,
-                    use_cache=True,
-                )
-            outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[
-                0
-            ].strip()
-            out.append(outputs)  # out[7] out[9] ...
-            inter_answers.append(outputs)
+            output_1, output_3, score_tmp = run_dynamic_attr_intermediate_conversation(
+                model=model,
+                tokenizer=tokenizer,
+                images_tensor=images_tensor,
+                image_sizes=image_sizes,
+                Q1=Q1,
+                Q3=Q3,
+                args=args,
+            )
+            out.append(output_1)
+            out.append(output_3)
+            inter_answers.append(output_3)
 
-            # get score from outputs
-            pattern = r'"score":\s*(\d+(\.\d+)?),'
-            match = re.search(pattern, outputs)
-            if match:
-                score_tmp = float(match.group(1))
-            else:
-                score_tmp = -1
-                print("No score found")
             if score_tmp > 0:
                 matched_frames_cnt += 1
 
@@ -312,26 +395,33 @@ def eval_model(args):
 
     return csv_path
 
+
 def model_score(csv_path):
-    with open(csv_path, 'r') as file:
+    with open(csv_path, "r") as file:
         reader = csv.reader(file)
         lines = list(reader)
         score = 0
         cnt = 0
         for line in lines[1:]:
             try:
-                score_tmp = float(line[-1]) 
-                score+=score_tmp
-                cnt+=1
+                score_tmp = float(line[-1])
+                score += score_tmp
+                cnt += 1
             except:
                 continue
-        
-        score = score/cnt
-        print("number of images evaluated: ", cnt," dynamic attribute binding model score: ",score)
-        
-    with open(csv_path, 'a', newline='') as file:
+
+        score = score / cnt
+        print(
+            "number of images evaluated: ",
+            cnt,
+            " dynamic attribute binding model score: ",
+            score,
+        )
+
+    with open(csv_path, "a", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(["score: ",score]) 
+        writer.writerow(["score: ", score])
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

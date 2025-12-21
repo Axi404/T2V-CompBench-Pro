@@ -2,6 +2,7 @@ import requests
 from PIL import Image
 from io import BytesIO
 from .transforms_utils import Compose, RandomResize, ToTensor, Normalize
+import torch
 
 
 def load_image(image_file):
@@ -24,10 +25,10 @@ def load_images(image_files):
 def load_and_process_image(image_path: str) -> tuple[Image.Image, "torch.Tensor"]:
     """
     Load and process an image for model input.
-    
+
     Args:
         image_path: Path to the image file.
-    
+
     Returns:
         A tuple of (PIL Image, processed tensor).
     """

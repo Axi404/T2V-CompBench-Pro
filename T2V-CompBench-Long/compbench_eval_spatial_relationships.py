@@ -18,7 +18,6 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 # Grounding DINO
-from DA.compbench_run_depth import run_depth
 from GSA.GroundingDINO.groundingdino.models import build_model
 from GSA.GroundingDINO.groundingdino.util.slconfig import SLConfig
 from GSA.GroundingDINO.groundingdino.util.utils import clean_state_dict
@@ -28,6 +27,7 @@ from GSA.segment_anything.segment_anything import (
     SamPredictor,
 )
 
+from utils.depth_utils import run_depth
 from utils.relation_utils import (
     filter_box,
     spatial_judge,
@@ -48,15 +48,17 @@ from utils.grounding_utils import get_grounding_output
 sys.path.append("./DA")
 
 
-def load_model(model_config_path: str, model_checkpoint_path: str, device: str) -> torch.nn.Module:
+def load_model(
+    model_config_path: str, model_checkpoint_path: str, device: str
+) -> torch.nn.Module:
     """
     Load and initialize the grounding model.
-    
+
     Args:
         model_config_path: Path to model config file.
         model_checkpoint_path: Path to model checkpoint.
         device: Device to load model on ('cuda' or 'cpu').
-    
+
     Returns:
         Loaded model on specified device.
     """
@@ -788,7 +790,12 @@ if __name__ == "__main__":
         "--use_sam_hq", action="store_true", help="using sam-hq for prediction"
     )
 
-    parser.add_argument("--depth_folder", type=str, required=False, default="playground/results/output_spatial_depth")
+    parser.add_argument(
+        "--depth_folder",
+        type=str,
+        required=False,
+        default="playground/results/output_spatial_depth",
+    )
     parser.add_argument(
         "--iou_threshold_3d",
         type=float,
@@ -802,7 +809,9 @@ if __name__ == "__main__":
         help="path to store the video scores",
     )
     parser.add_argument(
-        "--read-prompt-file", type=str, default="playground/meta_data/spatial_relationships.json"
+        "--read-prompt-file",
+        type=str,
+        default="playground/meta_data/spatial_relationships.json",
     )
     parser.add_argument("--video-path", type=str, required=True)
     parser.add_argument("--frame_folder", type=str)
@@ -817,7 +826,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     frame_folder = run_depth(
-        args.video_path, args.t2v_model, args.depth_folder, args.read_prompt_file, num_frames=96
+        args.video_path,
+        args.t2v_model,
+        args.depth_folder,
+        args.read_prompt_file,
+        num_frames=96,
     )
 
     args.frame_folder = frame_folder

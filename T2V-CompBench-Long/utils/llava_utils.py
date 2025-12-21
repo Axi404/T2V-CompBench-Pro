@@ -27,7 +27,6 @@ conv_templates = {
     "mistral_instruct": conv_mistral_instruct,
     "chatml_direct": conv_chatml_direct,
     "mistral_direct": conv_chatml_direct,
-
     "plain": conv_llava_plain,
     "v0_plain": conv_llava_plain,
     "llava_v0": conv_llava_v0,
@@ -35,9 +34,9 @@ conv_templates = {
     "llava_v1": conv_llava_v1,
     "v1_mmtag": conv_llava_v1_mmtag,
     "llava_llama_2": conv_llava_llama_2,
-
     "mpt": conv_mpt,
 }
+
 
 def tokenizer_image_token(
     prompt, tokenizer, image_token_index=IMAGE_TOKEN_INDEX, return_tensors=None
@@ -240,6 +239,7 @@ def process_anyres_image(image, processor, grid_pinpoints):
         for image_patch in image_patches
     ]
     return torch.stack(image_patches, dim=0)
+
 
 def disable_torch_init():
     """

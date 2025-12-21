@@ -6,6 +6,7 @@ from torchvision.io import write_video
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+
 def extract_frames(video_path, num_frames=16):
     frames = []
 
@@ -57,7 +58,11 @@ def merge_grid(image_list):
 def read_video_path(video_path):
     if os.path.isdir(video_path):  # if video_path is a list of videos
         video = os.listdir(video_path)
-        video = [video for video in video if not os.path.isdir(os.path.join(video_path, video))]
+        video = [
+            video
+            for video in video
+            if not os.path.isdir(os.path.join(video_path, video))
+        ]
     elif os.path.isfile(video_path):  # else if video_path is a single video
         video = [os.path.basename(video_path)]
         video_path = os.path.dirname(video_path)
@@ -70,13 +75,13 @@ def _process_single_video_to_frames(
 ) -> str:
     """
     Process a single video to frames.
-    
+
     Args:
         v: video filename
         video_path: directory containing the video
         output_path: directory to save the frames
         num_frames: number of frames to extract
-    
+
     Returns:
         vid_id: the video id that was processed
     """
@@ -96,12 +101,12 @@ def convert_video_to_frames(
 ) -> str:
     """
     Convert videos to frames using multi-threading.
-    
+
     Args:
         video_path: path to video file or directory containing videos
         num_frames: number of frames to extract per video
         max_workers: maximum number of threads to use
-    
+
     Returns:
         output_path: directory where frames are saved
     """
@@ -118,9 +123,10 @@ def convert_video_to_frames(
         futures = {
             executor.submit(
                 _process_single_video_to_frames, v, video_path, output_path, num_frames
-            ): v for v in video
+            ): v
+            for v in video
         }
-        
+
         for future in tqdm(as_completed(futures), total=len(futures)):
             try:
                 future.result()
@@ -133,19 +139,18 @@ def convert_video_to_frames(
     return output_path
 
 
-
 def _process_single_video_to_standard(
     v: str, video_path: str, output_path: str, num_frames: int
 ) -> str:
     """
     Process a single video to standard format.
-    
+
     Args:
         v: video filename
         video_path: directory containing the video
         output_path: directory to save the standard video
         num_frames: number of frames to extract
-    
+
     Returns:
         v_mp4: the output video filename
     """
@@ -163,12 +168,12 @@ def convert_video_to_standard_video(
 ) -> str:
     """
     Convert videos to standard format using multi-threading.
-    
+
     Args:
         video_path: path to video file or directory containing videos
         num_frames: number of frames to extract per video
         max_workers: maximum number of threads to use
-    
+
     Returns:
         output_path: directory where standard videos are saved
     """
@@ -184,10 +189,15 @@ def convert_video_to_standard_video(
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
-                _process_single_video_to_standard, v, video_path, output_path, num_frames
-            ): v for v in video
+                _process_single_video_to_standard,
+                v,
+                video_path,
+                output_path,
+                num_frames,
+            ): v
+            for v in video
         }
-        
+
         for future in tqdm(as_completed(futures), total=len(futures)):
             try:
                 future.result()
@@ -205,13 +215,13 @@ def _process_single_video_to_grid(
 ) -> str:
     """
     Process a single video to image grid.
-    
+
     Args:
         v: video filename
         video_path: directory containing the video
         output_path: directory to save the grid image
         num_image: number of frames to extract
-    
+
     Returns:
         vid_id: the video id that was processed
     """
@@ -228,20 +238,25 @@ def _process_single_video_to_grid(
     return vid_id
 
 
-def convert_video_to_grid(video_path: str, num_image: int = 6, max_workers: int = 8) -> str:
+def convert_video_to_grid(
+    video_path: str, num_image: int = 6, max_workers: int = 8
+) -> str:
     """
     Convert videos to image grids using multi-threading.
-    
+
     Args:
         video_path: path to video file or directory containing videos
         num_image: number of frames to extract per video
         max_workers: maximum number of threads to use
-    
+
     Returns:
         output_path: directory where grid images are saved
     """
     video, video_path = read_video_path(video_path)
-    print(f"start converting video to image grid with {num_image} frames from path:", video_path)
+    print(
+        f"start converting video to image grid with {num_image} frames from path:",
+        video_path,
+    )
     print(f"using {max_workers} threads")
 
     output_path = os.path.join(
@@ -253,9 +268,10 @@ def convert_video_to_grid(video_path: str, num_image: int = 6, max_workers: int 
         futures = {
             executor.submit(
                 _process_single_video_to_grid, v, video_path, output_path, num_image
-            ): v for v in video
+            ): v
+            for v in video
         }
-        
+
         for future in tqdm(as_completed(futures), total=len(futures)):
             try:
                 future.result()

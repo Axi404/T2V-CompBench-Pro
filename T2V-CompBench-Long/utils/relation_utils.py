@@ -1,5 +1,6 @@
 import torch
 
+
 def calculate_iou(box0, box1):
     # Calculate IoU
     # from xywh to xyxy
@@ -46,6 +47,7 @@ def filter_box(boxes, phrases, probs, iou_threshold):
             new_phrases.append(phrases[i])
 
     return new_boxes, new_phrases, new_probs
+
 
 def spatial_judge(box0, box1, spatial):
     # box:[xc,yc,w,h]

@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
 import gc
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
@@ -293,7 +294,9 @@ if __name__ == "__main__":
     parser.add_argument("--total_frame", type=str, default=16, required=False)
     parser.add_argument("--fps", type=str, default=8, required=False)
     parser.add_argument(
-        "--read-prompt-file", type=str, default="playground/meta_data/motion_binding.json"
+        "--read-prompt-file",
+        type=str,
+        default="playground/meta_data/motion_binding.json",
     )
     parser.add_argument(
         "--output_dir",
