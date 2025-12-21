@@ -194,6 +194,183 @@ def get_cleaned_data(all_prob, all_phrase, all_box, phrase_0, phrase_1):
     )
 
 
+def process_single_video_2d(
+    video_name: str,
+    prompt: str,
+    spatial: str,
+    phrase_0: str,
+    phrase_1: str,
+    frame_folder: str,
+    output_dir: str,
+    csv_path: str,
+    model: torch.nn.Module,
+    box_threshold: float,
+    text_threshold: float,
+    iou_threshold: float,
+    device: str,
+) -> None:
+    """
+    Process a single video for 2D spatial relationship evaluation.
+
+    Args:
+        video_name: Name of the video being processed.
+        prompt: Text prompt describing the spatial relationship.
+        spatial: Spatial relationship type (left, right, above, on, under, below).
+        phrase_0: First object phrase to detect.
+        phrase_1: Second object phrase to detect.
+        frame_folder: Path to folder containing video frames.
+        output_dir: Directory to save output visualizations.
+        csv_path: Path to CSV file for recording results.
+        model: Grounding model for object detection.
+        box_threshold: Threshold for box detection.
+        text_threshold: Threshold for text matching.
+        iou_threshold: IoU threshold for filtering duplicate boxes.
+        device: Device to run inference on.
+    """
+    os.makedirs(os.path.join(output_dir, video_name), exist_ok=True)
+    video_path = os.path.join(frame_folder, video_name)
+    images = os.listdir(video_path)
+    images.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
+
+    for image_name in images:
+        image_path = os.path.join(frame_folder, video_name, image_name)
+        image_pil, image = load_and_process_image(image_path)
+
+        # run model
+        boxes_filt_0, pred_phrases_0, prob_0 = get_grounding_output(
+            model,
+            image,
+            phrase_0,
+            box_threshold,
+            text_threshold,
+            device=device,
+        )
+        boxes_filt_1, pred_phrases_1, prob_1 = get_grounding_output(
+            model,
+            image,
+            phrase_1,
+            box_threshold,
+            text_threshold,
+            device=device,
+        )
+        size = image_pil.size
+
+        all_box = torch.cat((boxes_filt_0, boxes_filt_1), dim=0)
+        all_prob = prob_0 + prob_1
+        all_phrase = pred_phrases_0 + pred_phrases_1
+        all_box, all_phrase, all_prob = filter_box(
+            all_box, all_phrase, all_prob, iou_threshold=iou_threshold
+        )
+        (
+            clean_prob_0,
+            clean_prob_1,
+            clean_boxes_0,
+            clean_boxes_1,
+            clean_label_0,
+            clean_label_1,
+        ) = get_cleaned_data(all_prob, all_phrase, all_box, phrase_0, phrase_1)
+        m0 = len(clean_prob_0)
+        m1 = len(clean_prob_1)
+
+        record_all_correct_spatial = []
+        if m0 == 0 or m1 == 0:
+            if (m0 == 0 and m1 != 0) or (m0 != 0 and m1 == 0):  # 1 object missing
+                score_1 = -1
+            elif m0 == 0 and m1 == 0:  # both objects missing
+                score_1 = -2
+            write_to_csv(
+                csv_path,
+                "2dframe",
+                video_name=video_name,
+                image_name=image_name,
+                prompt=prompt,
+                m0=m0,
+                m1=m1,
+                score_1=score_1,
+            )
+            visualize_pred(
+                image_pil,
+                phrase_0,
+                phrase_1,
+                all_box,
+                all_phrase,
+                size,
+                record_all_correct_spatial,
+                None,
+                None,
+                None,
+                output_dir,
+                video_name,
+                image_name,
+            )
+            continue
+
+        # if m0 != 0 and m1 != 0:
+        for ii, jj in product(range(len(clean_boxes_0)), range(len(clean_boxes_1))):
+            _, correct_spatial, _, _, IoU, _ = spatial_judge(
+                clean_boxes_0[ii], clean_boxes_1[jj], spatial
+            )
+            if not correct_spatial:
+                continue
+
+            spatial_score_1 = 1 - IoU
+            prob_score_A = 0.5 * clean_prob_0[ii] + 0.5 * clean_prob_1[jj]
+            total_score_1 = 0.5 * spatial_score_1 + 0.5 * prob_score_A
+
+            info = {}
+            info["name"] = f"{ii}_{jj}"
+            info["box0"] = clean_boxes_0[ii]
+            info["box1"] = clean_boxes_1[jj]
+            info["total_score_1"] = total_score_1
+            info["spatial_score_1"] = spatial_score_1
+            info["label"] = [
+                clean_label_0[ii],
+                clean_label_1[jj],
+            ]
+            record_all_correct_spatial.append(info)
+
+        if len(record_all_correct_spatial) != 0:
+            total_score_1_list = []
+            for candidate_box in record_all_correct_spatial:
+                total_score_1_list.append(candidate_box["total_score_1"])
+            score_1, selected_box_0, selected_box_1, selected_label = pick_max_2d(
+                total_score_1_list, record_all_correct_spatial
+            )
+        else:
+            score_1 = 0  # wrong spatial relationship
+            selected_box_0 = None
+            selected_box_1 = None
+            selected_label = None
+
+        write_to_csv(
+            csv_path,
+            "2dframe",
+            video_name=video_name,
+            image_name=image_name,
+            prompt=prompt,
+            m0=m0,
+            m1=m1,
+            score_1=score_1,
+        )
+
+        # visualize pred
+        visualize_pred(
+            image_pil,
+            phrase_0,
+            phrase_1,
+            all_box,
+            all_phrase,
+            size,
+            record_all_correct_spatial,
+            selected_box_0,
+            selected_box_1,
+            selected_label,
+            output_dir,
+            video_name,
+            image_name,
+        )
+
+
 def spatial_2d(args):
     torch.set_grad_enabled(False)
     config_file = args.config  # change the path of the model config file
@@ -251,99 +428,249 @@ def spatial_2d(args):
             continue
 
         if spatial in ["left", "right", "above", "on", "under", "below"]:
-            os.makedirs(os.path.join(output_dir, videos[i]), exist_ok=True)
-            video_path = os.path.join(frame_folder, videos[i])
-            images = os.listdir(video_path)
-            images.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))  # sort
+            process_single_video_2d(
+                video_name=video_name,
+                prompt=prompt,
+                spatial=spatial,
+                phrase_0=phrase_0,
+                phrase_1=phrase_1,
+                frame_folder=frame_folder,
+                output_dir=output_dir,
+                csv_path=csv_path,
+                model=model,
+                box_threshold=box_threshold,
+                text_threshold=text_threshold,
+                iou_threshold=iou_threshold,
+                device=device,
+            )
 
-            for image_name in images:
-                image_path = os.path.join(frame_folder, videos[i], image_name)
-                image_pil, image = load_and_process_image(image_path)
+    output_csv = combine_frame_spatial_relationships(
+        f"{output_path}/{args.t2v_model}_2dframe.csv",
+        f"{output_path}/{args.t2v_model}_2dvideo.csv",
+    )
+    return output_csv
 
-                # run model
-                boxes_filt_0, pred_phrases_0, prob_0 = get_grounding_output(
-                    model,
-                    image,
-                    phrase_0,
-                    box_threshold,
-                    text_threshold,
-                    device=device,
+
+def process_single_video_3d(
+    video_name: str,
+    prompt: str,
+    spatial: str,
+    phrase_0: str,
+    phrase_1: str,
+    frame_folder: str,
+    depth_folder: str,
+    output_dir: str,
+    csv_path: str,
+    model: torch.nn.Module,
+    predictor: SamPredictor,
+    box_threshold: float,
+    text_threshold: float,
+    iou_threshold: float,
+    device: str,
+) -> None:
+    """
+    Process a single video for 3D spatial relationship evaluation.
+
+    Args:
+        video_name: Name of the video being processed.
+        prompt: Text prompt describing the spatial relationship.
+        spatial: Spatial relationship type (in front of, behind).
+        phrase_0: First object phrase to detect.
+        phrase_1: Second object phrase to detect.
+        frame_folder: Path to folder containing video frames.
+        depth_folder: Path to folder containing depth maps.
+        output_dir: Directory to save output visualizations.
+        csv_path: Path to CSV file for recording results.
+        model: Grounding model for object detection.
+        predictor: SAM predictor for segmentation.
+        box_threshold: Threshold for box detection.
+        text_threshold: Threshold for text matching.
+        iou_threshold: IoU threshold for filtering duplicate boxes.
+        device: Device to run inference on.
+    """
+    images = os.listdir(os.path.join(frame_folder, video_name))
+    images.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
+
+    for image_name in images:
+        image_path = os.path.join(frame_folder, video_name, image_name)
+
+        # load image
+        image_pil, image_loaded = load_and_process_image(image_path)
+
+        depth_path = os.path.join(depth_folder, video_name, image_name)
+
+        boxes_filt_0, pred_phrases_0, prob_0 = get_grounding_output(
+            model,
+            image_loaded,
+            phrase_0,
+            box_threshold,
+            text_threshold,
+            device=device,
+        )
+        boxes_filt_1, pred_phrases_1, prob_1 = get_grounding_output(
+            model,
+            image_loaded,
+            phrase_1,
+            box_threshold,
+            text_threshold,
+            device=device,
+        )
+        size = image_pil.size
+
+        all_box = torch.cat((boxes_filt_0, boxes_filt_1), dim=0)
+        all_prob = prob_0 + prob_1
+        all_phrase = pred_phrases_0 + pred_phrases_1
+        all_box, all_phrase, all_prob = filter_box(
+            all_box, all_phrase, all_prob, iou_threshold=iou_threshold
+        )
+
+        (
+            clean_prob_0,
+            clean_prob_1,
+            clean_boxes_0,
+            clean_boxes_1,
+            clean_label_0,
+            clean_label_1,
+        ) = get_cleaned_data(all_prob, all_phrase, all_box, phrase_0, phrase_1)
+        if len(clean_boxes_0) > 0:
+            boxes_filt_0 = torch.stack(clean_boxes_0, dim=0)
+        else:
+            boxes_filt_0 = torch.tensor([])
+        if len(clean_boxes_1) > 0:
+            boxes_filt_1 = torch.stack(clean_boxes_1, dim=0)
+        else:
+            boxes_filt_1 = torch.tensor([])
+        m0 = len(clean_prob_0)
+        m1 = len(clean_prob_1)
+
+        # sam
+        image = cv2.imread(image_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        predictor.set_image(image)
+
+        H, W = size[1], size[0]
+        for k in range(boxes_filt_0.size(0)):
+            boxes_filt_0[k] = boxes_filt_0[k] * torch.Tensor([W, H, W, H])
+            boxes_filt_0[k][:2] -= boxes_filt_0[k][2:] / 2
+            boxes_filt_0[k][2:] += boxes_filt_0[k][:2]
+        boxes_filt_0 = boxes_filt_0.cpu()
+
+        for k in range(boxes_filt_1.size(0)):
+            boxes_filt_1[k] = boxes_filt_1[k] * torch.Tensor([W, H, W, H])
+            boxes_filt_1[k][:2] -= boxes_filt_1[k][2:] / 2
+            boxes_filt_1[k][2:] += boxes_filt_1[k][:2]
+        boxes_filt_1 = boxes_filt_1.cpu()
+
+        transformed_boxes_0 = predictor.transform.apply_boxes_torch(
+            boxes_filt_0, image.shape[:2]
+        ).to(device)
+        transformed_boxes_1 = predictor.transform.apply_boxes_torch(
+            boxes_filt_1, image.shape[:2]
+        ).to(device)
+
+        if m0 != 0:
+            masks_0, _, _ = predictor.predict_torch(  # masks_0[0]:[1,320,576]
+                point_coords=None,
+                point_labels=None,
+                boxes=transformed_boxes_0.to(device),
+                multimask_output=False,
+            )
+
+        if m1 != 0:
+            masks_1, _, _ = predictor.predict_torch(
+                point_coords=None,
+                point_labels=None,
+                boxes=transformed_boxes_1.to(device),
+                multimask_output=False,
+            )
+
+        record_all_correct_spatial = []
+
+        if m0 == 0 or m1 == 0:
+            if (m0 == 0 and m1 != 0) or (m0 != 0 and m1 == 0):
+                score_1 = -1
+            elif m0 == 0 and m1 == 0:
+                score_1 = -2
+            write_to_csv(
+                csv_path,
+                "3dframe",
+                video_name=video_name,
+                image_name=image_name,
+                prompt=prompt,
+                m0=m0,
+                m1=m1,
+                score_1=score_1,
+            )
+
+            # visualize pred
+            visualize_pred_3d(
+                record_all_correct_spatial,
+                None,
+                None,
+                output_dir,
+                video_name,
+                image_name,
+            )
+            continue
+
+        plt.figure(figsize=(10, 10))
+        plt.imshow(image)
+        for box, label in zip(boxes_filt_0, clean_label_0):
+            show_box(box.numpy(), plt.gca(), label)
+        for box, label in zip(boxes_filt_1, clean_label_1):
+            show_box(box.numpy(), plt.gca(), label)
+
+        for ii, jj in product(range(len(clean_boxes_0)), range(len(clean_boxes_1))):
+            IoU, _ = intersection_judge(clean_boxes_0[ii], clean_boxes_1[jj])
+            if IoU != 0:
+                depth_map = cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE)
+
+                mask_image_0 = (masks_0[ii].cpu().numpy().squeeze() * 255).astype(
+                    np.uint8
                 )
-                boxes_filt_1, pred_phrases_1, prob_1 = get_grounding_output(
-                    model,
-                    image,
-                    phrase_1,
-                    box_threshold,
-                    text_threshold,
-                    device=device,
-                )
-                size = image_pil.size
+                obj1_seg = cv2.bitwise_and(depth_map, depth_map, mask=mask_image_0)
+                non_zero_0 = cv2.countNonZero(mask_image_0)
+                if non_zero_0 == 0:
+                    d1 = 0
+                else:
+                    d1 = np.sum(obj1_seg) / non_zero_0
 
-                all_box = torch.cat((boxes_filt_0, boxes_filt_1), dim=0)
-                all_prob = prob_0 + prob_1
-                all_phrase = pred_phrases_0 + pred_phrases_1
-                all_box, all_phrase, all_prob = filter_box(
-                    all_box, all_phrase, all_prob, iou_threshold=iou_threshold
+                mask_image_1 = (masks_1[jj].cpu().numpy().squeeze() * 255).astype(
+                    np.uint8
                 )
-                (
-                    clean_prob_0,
-                    clean_prob_1,
-                    clean_boxes_0,
-                    clean_boxes_1,
-                    clean_label_0,
-                    clean_label_1,
-                ) = get_cleaned_data(all_prob, all_phrase, all_box, phrase_0, phrase_1)
-                m0 = len(clean_prob_0)
-                m1 = len(clean_prob_1)
+                obj2_seg = cv2.bitwise_and(depth_map, depth_map, mask=mask_image_1)
+                non_zero_1 = cv2.countNonZero(mask_image_1)
+                if non_zero_1 == 0:
+                    d2 = 0
+                else:
+                    d2 = np.sum(obj2_seg) / non_zero_1
 
-                record_all_correct_spatial = []
-                if m0 == 0 or m1 == 0:
-                    if (m0 == 0 and m1 != 0) or (
-                        m0 != 0 and m1 == 0
-                    ):  # 1 object missing
-                        score_1 = -1
-                    elif m0 == 0 and m1 == 0:  # both objects missing
-                        score_1 = -2
-                    write_to_csv(
-                        csv_path,
-                        "2dframe",
-                        video_name=videos[i],
-                        image_name=image_name,
-                        prompt=prompt,
-                        m0=m0,
-                        m1=m1,
-                        score_1=score_1,
-                    )
-                    visualize_pred(
-                        image_pil,
-                        phrase_0,
-                        phrase_1,
-                        all_box,
-                        all_phrase,
-                        size,
-                        record_all_correct_spatial,
-                        None,
-                        None,
-                        None,
+                if (not 0 <= d1 <= 255) or (not 0 <= d2 <= 255):
+                    print("d1 wrong value")
+
+                # Check depth relationship based on spatial type
+                depth_condition = (spatial == "in front of" and d1 > d2) or (
+                    spatial == "behind" and d1 < d2
+                )
+                if depth_condition:
+                    prob_score = 0.5 * prob_0[ii] + 0.5 * prob_1[jj]
+                    spatial_score_1 = IoU
+                    total_score_1 = 0.5 * prob_score + 0.5 * spatial_score_1
+
+                    seg_save_path = os.path.join(
                         output_dir,
                         video_name,
-                        image_name,
+                        image_name.split(".")[0],
+                        f"obj1_seg_{ii}.png",
                     )
-                    continue
-
-                # if m0 != 0 and m1 != 0:
-                for ii, jj in product(
-                    range(len(clean_boxes_0)), range(len(clean_boxes_1))
-                ):
-                    _, correct_spatial, _, _, IoU, _ = spatial_judge(
-                        clean_boxes_0[ii], clean_boxes_1[jj], spatial
+                    cv2.imwrite(seg_save_path, obj1_seg)
+                    seg_save_path = os.path.join(
+                        output_dir,
+                        video_name,
+                        image_name.split(".")[0],
+                        f"obj2_seg_{jj}.png",
                     )
-                    if not correct_spatial:
-                        continue
-
-                    spatial_score_1 = 1 - IoU
-                    prob_score_A = 0.5 * clean_prob_0[ii] + 0.5 * clean_prob_1[jj]
-                    total_score_1 = 0.5 * spatial_score_1 + 0.5 * prob_score_A
+                    cv2.imwrite(seg_save_path, obj2_seg)
 
                     info = {}
                     info["name"] = f"{ii}_{jj}"
@@ -351,58 +678,43 @@ def spatial_2d(args):
                     info["box1"] = clean_boxes_1[jj]
                     info["total_score_1"] = total_score_1
                     info["spatial_score_1"] = spatial_score_1
-                    info["label"] = [
-                        clean_label_0[ii],
-                        clean_label_1[jj],
-                    ]
+                    info["mask0"] = masks_0[ii]
+                    info["mask1"] = masks_1[jj]
+
                     record_all_correct_spatial.append(info)
 
-                if len(record_all_correct_spatial) != 0:
-                    total_score_1_list = []
-                    for candidate_box in record_all_correct_spatial:
-                        total_score_1_list.append(candidate_box["total_score_1"])
-                    score_1, selected_box_0, selected_box_1, selected_label = (
-                        pick_max_2d(total_score_1_list, record_all_correct_spatial)
-                    )
-                else:
-                    score_1 = 0  # wrong spatial relationship
-                    selected_box_0 = None
-                    selected_box_1 = None
-                    selected_label = None
+        if len(record_all_correct_spatial) != 0:
+            total_score_1_list = []
+            for candidate_box in record_all_correct_spatial:
+                total_score_1_list.append(candidate_box["total_score_1"])
+            score_1, mask0, mask1 = pick_max_3d(
+                total_score_1_list, record_all_correct_spatial
+            )
+        else:
+            score_1 = 0
+            mask0 = None
+            mask1 = None
 
-                write_to_csv(
-                    csv_path,
-                    "2dframe",
-                    video_name=videos[i],
-                    image_name=image_name,
-                    prompt=prompt,
-                    m0=m0,
-                    m1=m1,
-                    score_1=score_1,
-                )
+        write_to_csv(
+            csv_path,
+            "3dframe",
+            video_name=video_name,
+            image_name=image_name,
+            prompt=prompt,
+            m0=m0,
+            m1=m1,
+            score_1=score_1,
+        )
 
-                # visualize pred
-                visualize_pred(
-                    image_pil,
-                    phrase_0,
-                    phrase_1,
-                    all_box,
-                    all_phrase,
-                    size,
-                    record_all_correct_spatial,
-                    selected_box_0,
-                    selected_box_1,
-                    selected_label,
-                    output_dir,
-                    video_name,
-                    image_name,
-                )
-
-    output_csv = combine_frame_spatial_relationships(
-        f"{output_path}/{args.t2v_model}_2dframe.csv",
-        f"{output_path}/{args.t2v_model}_2dvideo.csv",
-    )
-    return output_csv
+        # visualize pred
+        visualize_pred_3d(
+            record_all_correct_spatial,
+            mask0,
+            mask1,
+            output_dir,
+            video_name,
+            image_name,
+        )
 
 
 def spatial_3d(args):
@@ -461,271 +773,27 @@ def spatial_3d(args):
         spatial = prompts[num]["spatial"]
         if spatial in ["in front of", "behind"]:
             prompt = prompts[num]["prompt"]
-            phrase_0 = prompts[num]["object_1"]  # A is on the left of B
+            phrase_0 = prompts[num]["object_1"]
             phrase_1 = prompts[num]["object_2"]
 
-            images = os.listdir(os.path.join(frame_folder, videos[i]))
-            images.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
+            process_single_video_3d(
+                video_name=video_name,
+                prompt=prompt,
+                spatial=spatial,
+                phrase_0=phrase_0,
+                phrase_1=phrase_1,
+                frame_folder=frame_folder,
+                depth_folder=depth_folder,
+                output_dir=output_dir,
+                csv_path=csv_path,
+                model=model,
+                predictor=predictor,
+                box_threshold=box_threshold,
+                text_threshold=text_threshold,
+                iou_threshold=iou_threshold,
+                device=device,
+            )
 
-            for image_name in images:
-                image_path = os.path.join(frame_folder, videos[i], image_name)
-
-                # load image
-                image_pil, image_loded = load_and_process_image(image_path)
-
-                depth_path = os.path.join(depth_folder, videos[i], image_name)
-
-                boxes_filt_0, pred_phrases_0, prob_0 = get_grounding_output(
-                    model,
-                    image_loded,
-                    phrase_0,
-                    box_threshold,
-                    text_threshold,
-                    device=device,
-                )
-                boxes_filt_1, pred_phrases_1, prob_1 = get_grounding_output(
-                    model,
-                    image_loded,
-                    phrase_1,
-                    box_threshold,
-                    text_threshold,
-                    device=device,
-                )
-                size = image_pil.size
-
-                all_box = torch.cat((boxes_filt_0, boxes_filt_1), dim=0)
-                all_prob = prob_0 + prob_1
-                all_phrase = pred_phrases_0 + pred_phrases_1
-                all_box, all_phrase, all_prob = filter_box(
-                    all_box, all_phrase, all_prob, iou_threshold=iou_threshold
-                )
-
-                (
-                    clean_prob_0,
-                    clean_prob_1,
-                    clean_boxes_0,
-                    clean_boxes_1,
-                    clean_label_0,
-                    clean_label_1,
-                ) = get_cleaned_data(all_prob, all_phrase, all_box, phrase_0, phrase_1)
-                if len(clean_boxes_0) > 0:
-                    boxes_filt_0 = torch.stack(clean_boxes_0, dim=0)
-                else:
-                    boxes_filt_0 = torch.tensor([])
-                if len(clean_boxes_1) > 0:
-                    boxes_filt_1 = torch.stack(clean_boxes_1, dim=0)
-                else:
-                    boxes_filt_1 = torch.tensor([])
-                m0 = len(clean_prob_0)
-                m1 = len(clean_prob_1)
-
-                # sam
-                image = cv2.imread(image_path)
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                predictor.set_image(image)
-
-                H, W = size[1], size[0]
-                for k in range(boxes_filt_0.size(0)):
-                    boxes_filt_0[k] = boxes_filt_0[k] * torch.Tensor([W, H, W, H])
-                    boxes_filt_0[k][:2] -= boxes_filt_0[k][2:] / 2
-                    boxes_filt_0[k][2:] += boxes_filt_0[k][:2]
-                boxes_filt_0 = boxes_filt_0.cpu()
-
-                for k in range(boxes_filt_1.size(0)):
-                    boxes_filt_1[k] = boxes_filt_1[k] * torch.Tensor([W, H, W, H])
-                    boxes_filt_1[k][:2] -= boxes_filt_1[k][2:] / 2
-                    boxes_filt_1[k][2:] += boxes_filt_1[k][:2]
-                boxes_filt_1 = boxes_filt_1.cpu()
-
-                transformed_boxes_0 = predictor.transform.apply_boxes_torch(
-                    boxes_filt_0, image.shape[:2]
-                ).to(device)
-                transformed_boxes_1 = predictor.transform.apply_boxes_torch(
-                    boxes_filt_1, image.shape[:2]
-                ).to(device)
-
-                if m0 != 0:
-                    masks_0, _, _ = predictor.predict_torch(  # masks_0[0]:[1,320,576]
-                        point_coords=None,
-                        point_labels=None,
-                        boxes=transformed_boxes_0.to(device),
-                        multimask_output=False,
-                    )
-
-                if m1 != 0:
-                    masks_1, _, _ = predictor.predict_torch(
-                        point_coords=None,
-                        point_labels=None,
-                        boxes=transformed_boxes_1.to(device),
-                        multimask_output=False,
-                    )
-
-                record_all_correct_spatial = []
-
-                if m0 == 0 or m1 == 0:
-                    if (m0 == 0 and m1 != 0) or (m0 != 0 and m1 == 0):
-                        score_1 = -1
-                    elif m0 == 0 and m1 == 0:
-                        score_1 = -2
-                    write_to_csv(
-                        csv_path,
-                        "3dframe",
-                        video_name=videos[i],
-                        image_name=image_name,
-                        prompt=prompt,
-                        m0=m0,
-                        m1=m1,
-                        score_1=score_1,
-                    )
-
-                    # visualize pred
-                    visualize_pred_3d(
-                        record_all_correct_spatial,
-                        None,
-                        None,
-                        output_dir,
-                        videos[i],
-                        image_name,
-                    )
-                    continue
-
-                plt.figure(figsize=(10, 10))
-                plt.imshow(image)
-                for box, label in zip(boxes_filt_0, clean_label_0):
-                    show_box(box.numpy(), plt.gca(), label)
-                for box, label in zip(boxes_filt_1, clean_label_1):
-                    show_box(box.numpy(), plt.gca(), label)
-
-                for ii, jj in product(
-                    range(len(clean_boxes_0)), range(len(clean_boxes_1))
-                ):
-                    IoU, _ = intersection_judge(clean_boxes_0[ii], clean_boxes_1[jj])
-                    if IoU != 0:
-                        depth_map = cv2.imread(depth_path, cv2.IMREAD_GRAYSCALE)
-
-                        mask_image_0 = (
-                            masks_0[ii].cpu().numpy().squeeze() * 255
-                        ).astype(np.uint8)
-                        obj1_seg = cv2.bitwise_and(
-                            depth_map, depth_map, mask=mask_image_0
-                        )
-                        non_zero_0 = cv2.countNonZero(mask_image_0)
-                        if non_zero_0 == 0:
-                            d1 = 0
-                        else:
-                            d1 = np.sum(obj1_seg) / non_zero_0
-
-                        mask_image_1 = (
-                            masks_1[jj].cpu().numpy().squeeze() * 255
-                        ).astype(np.uint8)
-                        obj2_seg = cv2.bitwise_and(
-                            depth_map, depth_map, mask=mask_image_1
-                        )
-                        non_zero_1 = cv2.countNonZero(mask_image_1)
-                        if non_zero_1 == 0:
-                            d2 = 0
-                        else:
-                            d2 = np.sum(obj2_seg) / non_zero_1
-
-                        if (not 0 <= d1 <= 255) or (not 0 <= d2 <= 255):
-                            print("d1 wrong value")
-                        if spatial == "in front of":
-                            if d1 > d2:
-                                prob_score = 0.5 * prob_0[ii] + 0.5 * prob_1[jj]
-                                spatial_score_1 = IoU
-                                total_score_1 = 0.5 * prob_score + 0.5 * spatial_score_1
-
-                                seg_save_path = os.path.join(
-                                    output_dir,
-                                    videos[i],
-                                    image_name.split(".")[0],
-                                    f"obj1_seg_{ii}.png",
-                                )
-                                cv2.imwrite(seg_save_path, obj1_seg)
-                                seg_save_path = os.path.join(
-                                    output_dir,
-                                    videos[i],
-                                    image_name.split(".")[0],
-                                    f"obj2_seg_{jj}.png",
-                                )
-                                cv2.imwrite(seg_save_path, obj2_seg)
-
-                                info = {}
-                                info["name"] = f"{ii}_{jj}"
-                                info["box0"] = clean_boxes_0[ii]
-                                info["box1"] = clean_boxes_1[jj]
-                                info["total_score_1"] = total_score_1
-                                info["spatial_score_1"] = spatial_score_1
-                                info["mask0"] = masks_0[ii]
-                                info["mask1"] = masks_1[jj]
-
-                                record_all_correct_spatial.append(info)
-
-                        elif spatial == "behind":
-                            if d1 < d2:
-                                prob_score = 0.5 * prob_0[ii] + 0.5 * prob_1[jj]
-                                spatial_score_1 = IoU
-                                total_score_1 = 0.5 * prob_score + 0.5 * spatial_score_1
-
-                                seg_save_path = os.path.join(
-                                    output_dir,
-                                    videos[i],
-                                    image_name.split(".")[0],
-                                    f"obj1_seg_{ii}.png",
-                                )
-                                cv2.imwrite(seg_save_path, obj1_seg)
-                                seg_save_path = os.path.join(
-                                    output_dir,
-                                    videos[i],
-                                    image_name.split(".")[0],
-                                    f"obj2_seg_{jj}.png",
-                                )
-                                cv2.imwrite(seg_save_path, obj2_seg)
-
-                                info = {}
-                                info["name"] = f"{ii}_{jj}"
-                                info["box0"] = clean_boxes_0[ii]
-                                info["box1"] = clean_boxes_1[jj]
-                                info["total_score_1"] = total_score_1
-                                info["spatial_score_1"] = spatial_score_1
-                                info["mask0"] = masks_0[ii]
-                                info["mask1"] = masks_1[jj]
-
-                                record_all_correct_spatial.append(info)
-
-                if len(record_all_correct_spatial) != 0:
-                    total_score_1_list = []
-                    for candidate_box in record_all_correct_spatial:
-                        total_score_1_list.append(candidate_box["total_score_1"])
-                    score_1, mask0, mask1 = pick_max_3d(
-                        total_score_1_list, record_all_correct_spatial
-                    )
-
-                else:
-                    score_1 = 0
-                    mask0 = None
-                    mask1 = None
-
-                write_to_csv(
-                    csv_path,
-                    "3dframe",
-                    video_name=videos[i],
-                    image_name=image_name,
-                    prompt=prompt,
-                    m0=m0,
-                    m1=m1,
-                    score_1=score_1,
-                )
-
-                # visualize pred
-                visualize_pred_3d(
-                    record_all_correct_spatial,
-                    mask0,
-                    mask1,
-                    output_dir,
-                    videos[i],
-                    image_name,
-                )
     output_csv = combine_frame_spatial_relationships(
         f"{output_path}/{args.t2v_model}_3dframe.csv",
         f"{output_path}/{args.t2v_model}_3dvideo.csv",

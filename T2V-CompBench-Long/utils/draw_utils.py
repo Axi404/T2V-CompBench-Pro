@@ -19,7 +19,8 @@ def plot_boxes_to_image(
         color1 = (255, 0, 0)
         color2 = (0, 0, 255)
     elif color1 is None or color2 is None:
-        print("wrong objects")
+        # print("wrong objects")
+        pass
 
     draw = ImageDraw.Draw(image_pil)
     mask = Image.new("L", image_pil.size, 0)
@@ -27,15 +28,6 @@ def plot_boxes_to_image(
 
     # draw boxes and masks
     for box, label, obj in zip(boxes, labels, objs):
-        # TODO: spatial relationships
-        # if obj == prompt_objs[0]:  # obj1
-        #     color = color1
-        # elif obj == prompt_objs[1]:  # obj2
-        #     color = color2
-        # else:
-        #     print("wrong objects")
-        #     color = (0, 0, 0)
-        # Check the difference
         if obj == prompt_objs[0]:  # obj1
             color = color1
         elif len(prompt_objs) == 2:
@@ -44,10 +36,10 @@ def plot_boxes_to_image(
             elif obj == prompt_objs[0]:  # obj1
                 color = color1
             else:
-                print("wrong objects")
+                # print("wrong objects")
                 color = (0, 0, 0)
         else:
-            print("wrong objects")
+            # print("wrong objects")
             color = (0, 0, 0)
 
         # from 0..1 to 0..W, 0..H

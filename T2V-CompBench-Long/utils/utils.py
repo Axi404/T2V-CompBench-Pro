@@ -338,7 +338,6 @@ def combine_frame_spatial_relationships(input_csv, output_csv):
 
 
 def combine_csv_and_cal_model_score(csv_2d, csv_3d, output_file):
-
     with open(csv_2d, "r") as file:
         reader = csv.reader(file)
         lines_2d = list(reader)
@@ -350,7 +349,6 @@ def combine_csv_and_cal_model_score(csv_2d, csv_3d, output_file):
     lines = sorted(lines, key=lambda x: int(x[0]))  # Sort by the first element
     lines = [["id", "score_frame", "Score"]] + lines
     score = []
-    # print(lines)
     for line in lines[1:]:
         score.append(float(line[-1]))
 

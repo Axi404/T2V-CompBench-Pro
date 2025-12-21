@@ -343,6 +343,371 @@ def project(pos, t, time_steps, heigh, width):
     return pos
 
 
+def process_single_mask(
+    mask_name: str,
+    mask_folder: str,
+    vid: str,
+    video: torch.Tensor,
+    tracks: torch.Tensor,
+    args,
+    resolution: tuple,
+    save_prefix: str,
+    csv_path: str,
+    mask_type: str,
+    this_prompt: str,
+    object_1: str,
+    d_1: str,
+    object_2: str,
+    d_2: str,
+) -> dict:
+    """
+    Process a single mask and compute motion changes.
+
+    Args:
+        mask_name: Name of the mask file.
+        mask_folder: Path to the mask folder.
+        vid: Video identifier.
+        video: Video tensor.
+        tracks: Tracks tensor.
+        args: Command line arguments.
+        resolution: Resolution tuple (height, width).
+        save_prefix: Path prefix for saving output.
+        csv_path: Path to the CSV file.
+        mask_type: Type of mask ("foreground" or "background").
+        this_prompt: Prompt text.
+        object_1: First object name.
+        d_1: Direction of first object.
+        object_2: Second object name.
+        d_2: Direction of second object.
+
+    Returns:
+        Dictionary containing change_in_x, change_in_y, and xy_json.
+    """
+    mask_path = osp.join(mask_folder, vid.split(".")[0], mask_name)
+    if any(["mask" in mode] for mode in args.visualization_modes) and osp.exists(
+        mask_path
+    ):
+        mask = read_frame(mask_path, resolution=resolution)[0] > 0.5
+    else:
+        mask = torch.ones(args.height, args.width).bool()
+
+    # Clone for foreground to avoid modifying original tensors
+    if mask_type == "foreground":
+        data = {"video": video.clone(), "tracks": tracks.clone(), "mask": mask}
+    else:
+        data = {"video": video, "tracks": tracks, "mask": mask}
+
+    data = to_device(data, "cuda")
+
+    if data["tracks"].ndim == 4 and args.rainbow_mode == "left_right":
+        data["mask"] = data["mask"].permute(1, 0)
+        data["tracks"] = data["tracks"].permute(0, 2, 1, 3)
+    elif data["tracks"].ndim == 3:
+        points = data["tracks"][0]
+        x, y = points[..., 0].long(), points[..., 1].long()
+        x, y = x - x.min(), y - y.min()
+        if args.rainbow_mode == "left_right":
+            idx = y + x * y.max()
+        else:
+            idx = x + y * x.max()
+        order = idx.argsort(dim=0)
+        data["tracks"] = data["tracks"][:, order]
+
+    for mode in args.visualization_modes:
+        output_video, x_change_list, y_change_list = forward(data, mode=mode, args=args)
+
+    # Find the last valid x and y changes (not -10000)
+    last_x = -10000
+    last_y = -10000
+    if len(x_change_list) > 0:
+        for cnt in range(len(x_change_list)):
+            last_x = x_change_list[-(cnt + 1)]
+            last_y = y_change_list[-(cnt + 1)]
+            if (last_x == -10000 and last_y != -10000) or (
+                last_y == -10000 and last_x != -10000
+            ):
+                print("NO WAY")
+                break
+            if last_x != -10000 or last_y != -10000:
+                print("last? ", -(cnt + 1))
+                break
+        change_in_x = last_x - x_change_list[0]
+        change_in_y = last_y - y_change_list[0]
+    else:
+        change_in_x = 0
+        change_in_y = 0
+
+    xy_json = {
+        "x_change_list": x_change_list,
+        "y_change_list": y_change_list,
+    }
+
+    save_path = osp.join(save_prefix, mask_name.split(".")[0] + ".mp4")
+    write_video(output_video, save_path)
+    write_to_csv(
+        csv_path,
+        mask_type,
+        vid=vid.split(".")[0],
+        prompt=this_prompt,
+        object_1=object_1,
+        d_1=d_1,
+        object_2=object_2,
+        d_2=d_2,
+        mask_name=mask_name,
+        xy_json=xy_json,
+        change_in_x=change_in_x,
+        change_in_y=change_in_y,
+    )
+
+    # Clean up data for foreground
+    if mask_type == "foreground":
+        del data
+
+    return {
+        "change_in_x": change_in_x,
+        "change_in_y": change_in_y,
+        "xy_json": xy_json,
+    }
+
+
+def process_single_video_background(
+    video_name: str,
+    prompts: list,
+    video_folder: str,
+    mask_folder: str,
+    output_dir: str,
+    csv_path: str,
+    model,
+    args,
+    resolution: tuple,
+) -> dict:
+    """
+    Process a single video for background motion binding evaluation.
+
+    Args:
+        video_name: Name of the video file.
+        prompts: List of prompt dictionaries.
+        video_folder: Path to the video folder.
+        mask_folder: Path to the mask folder.
+        output_dir: Output directory for results.
+        csv_path: Path to the CSV file.
+        model: The tracking model.
+        args: Command line arguments.
+        resolution: Resolution tuple (height, width).
+
+    Returns:
+        Dictionary containing score information for the video.
+    """
+    ind = int(video_name[0:4]) - 1
+    vid = video_name
+
+    save_prefix = osp.join(output_dir, vid.split(".")[0])
+    os.makedirs(save_prefix, exist_ok=True)
+
+    args.result_path = save_prefix
+    tracks_path = osp.join(args.result_path, "tracks.pth")
+
+    this_prompt = prompts[ind]["prompt"]
+    object_1 = prompts[ind]["object_1"]
+    object_2 = prompts[ind]["object_2"]
+    d_1 = prompts[ind]["d_1"]
+    d_2 = prompts[ind]["d_2"]
+    directions = ["left", "right", "up", "down", ""]
+    if d_1 not in directions[:4] or d_2 not in directions:
+        print(d_1, d_2, " direction not included!!!, index: ", vid)
+        return {"score": None, "error": "direction_not_included"}
+
+    video = read_video(osp.join(video_folder, vid), resolution=resolution).cuda()
+
+    if not osp.exists(tracks_path) or args.recompute_tracks:
+        with torch.no_grad():
+            pred = model({"video": video[None]}, mode=args.inference_mode, **vars(args))
+        tracks = pred["tracks"][0]
+        if args.save_tracks:
+            torch.save(tracks.cpu(), tracks_path)
+        del pred
+    else:
+        tracks = torch.load(tracks_path)
+
+    masks = os.listdir(osp.join(mask_folder, vid.split(".")[0]))
+    real_masks = []
+    for file_name in masks:
+        if (
+            file_name.split(".")[0] == "mask_background"
+            and file_name.split(".")[-1] == "jpg"
+        ):
+            real_masks.append(file_name)
+
+    if len(real_masks) == 0:
+        write_to_csv(
+            csv_path,
+            "background",
+            vid=vid.split(".")[0],
+            prompt=this_prompt,
+            object_1=object_1,
+            d_1=d_1,
+            object_2=object_2,
+            d_2=d_2,
+            mask_name="",
+            xy_json="",
+            change_in_x="",
+            change_in_y="",
+        )
+    else:
+        for mask_name in real_masks:
+            process_single_mask(
+                mask_name=mask_name,
+                mask_folder=mask_folder,
+                vid=vid,
+                video=video,
+                tracks=tracks,
+                args=args,
+                resolution=resolution,
+                save_prefix=save_prefix,
+                csv_path=csv_path,
+                mask_type="background",
+                this_prompt=this_prompt,
+                object_1=object_1,
+                d_1=d_1,
+                object_2=object_2,
+                d_2=d_2,
+            )
+
+    # Clean up GPU memory
+    del video, tracks
+    torch.cuda.empty_cache()
+
+
+def process_single_video_foreground(
+    video_name: str,
+    prompts: list,
+    video_folder: str,
+    mask_folder: str,
+    output_dir: str,
+    csv_path: str,
+    model,
+    args,
+    resolution: tuple,
+) -> dict:
+    """
+    Process a single video for foreground motion binding evaluation.
+
+    Args:
+        video_name: Name of the video file.
+        prompts: List of prompt dictionaries.
+        video_folder: Path to the video folder.
+        mask_folder: Path to the mask folder.
+        output_dir: Output directory for results.
+        csv_path: Path to the CSV file.
+        model: The tracking model.
+        args: Command line arguments.
+        resolution: Resolution tuple (height, width).
+
+    Returns:
+        Dictionary containing score information for the video.
+    """
+    ind = int(video_name[0:4]) - 1
+    vid = video_name
+
+    this_prompt = prompts[ind]["prompt"]
+    object_1 = prompts[ind]["object_1"]
+    object_2 = prompts[ind]["object_2"]
+    d_1 = prompts[ind]["d_1"]
+    d_2 = prompts[ind]["d_2"]
+    directions = ["left", "right", "up", "down", ""]
+    if d_1 not in directions[:4] or d_2 not in directions:
+        print(d_1, d_2, " direction not included!!!, index: ", vid)
+        return {"score": None, "error": "direction_not_included"}
+
+    masks = os.listdir(osp.join(mask_folder, vid.split(".")[0]))
+    real_masks = []
+    for file_name in masks:
+        parts = file_name.split("_")
+        if (
+            file_name.split(".")[-1] == "jpg"
+            and len(parts) >= 2
+            and parts[1] == "foreground"
+        ):
+            real_masks.append(file_name)
+
+    if len(real_masks) == 0 or len(real_masks) == 1:
+        write_to_csv(
+            csv_path,
+            "foreground",
+            vid=vid.split(".")[0],
+            prompt=this_prompt,
+            object_1=object_1,
+            d_1=d_1,
+            object_2=object_2,
+            d_2=d_2,
+            mask_name="",
+            xy_json="",
+            change_in_x="",
+            change_in_y="",
+        )
+        if len(real_masks) == 0:
+            write_to_csv(
+                csv_path,
+                "foreground",
+                vid=vid.split(".")[0],
+                prompt=this_prompt,
+                object_1=object_1,
+                d_1=d_1,
+                object_2=object_2,
+                d_2=d_2,
+                mask_name="",
+                xy_json="",
+                change_in_x="",
+                change_in_y="",
+            )
+        return
+
+    # Video loading and tracks computation
+    save_prefix = osp.join(output_dir, vid.split(".")[0])
+    os.makedirs(save_prefix, exist_ok=True)
+    args.result_path = save_prefix
+    tracks_path = osp.join(args.result_path, "tracks.pth")
+
+    video = read_video(osp.join(video_folder, vid), resolution=resolution).cuda()
+
+    if not osp.exists(tracks_path) or args.recompute_tracks:
+        with torch.no_grad():
+            pred = model(
+                {"video": video[None]},
+                mode=args.inference_mode,
+                **vars(args),
+            )
+        tracks = pred["tracks"][0]
+        if args.save_tracks:
+            torch.save(tracks.cpu(), tracks_path)
+        del pred
+    else:
+        tracks = torch.load(tracks_path)
+
+    for mask_name in real_masks:
+        process_single_mask(
+            mask_name=mask_name,
+            mask_folder=mask_folder,
+            vid=vid,
+            video=video,
+            tracks=tracks,
+            args=args,
+            resolution=resolution,
+            save_prefix=save_prefix,
+            csv_path=csv_path,
+            mask_type="foreground",
+            this_prompt=this_prompt,
+            object_1=object_1,
+            d_1=d_1,
+            object_2=object_2,
+            d_2=d_2,
+        )
+
+    # Clean up GPU memory
+    del video, tracks
+    torch.cuda.empty_cache()
+
+
 def combine_fore_back(foreground, background, output_csv):
     back_x = []
     back_y = []
@@ -622,147 +987,17 @@ def background(args, model=None):
     evaluated = max(line_count - 1, 0)
 
     for i in range(evaluated, len(videos)):
-        video_name = videos[i]
-        ind = int(video_name[0:4]) - 1
-        vid = video_name
-
-        save_prefix = osp.join(output_dir, vid.split(".")[0])
-        os.makedirs(save_prefix, exist_ok=True)
-
-        args.result_path = save_prefix
-        tracks_path = osp.join(args.result_path, "tracks.pth")
-
-        this_prompt = prompts[ind]["prompt"]
-        object_1 = prompts[ind]["object_1"]  # A is on the left of B
-        object_2 = prompts[ind]["object_2"]
-        d_1 = prompts[ind]["d_1"]
-        d_2 = prompts[ind]["d_2"]
-        directions = ["left", "right", "up", "down", ""]
-        if d_1 not in directions[:4] or d_2 not in directions:
-            print(d_1, d_2, " direction not included!!!, index: ", vid)
-            break
-
-        video = read_video(
-            osp.join(video_folder, vid), resolution=resolution
-        ).cuda()  # , time_steps=20
-
-        if not osp.exists(tracks_path) or args.recompute_tracks:
-            with torch.no_grad():
-                pred = model(
-                    {"video": video[None]}, mode=args.inference_mode, **vars(args)
-                )
-            tracks = pred["tracks"][0]
-            if args.save_tracks:
-                torch.save(tracks.cpu(), tracks_path)
-            # Clean up prediction to free memory
-            del pred
-        else:
-            tracks = torch.load(tracks_path)
-
-        masks = os.listdir(osp.join(mask_folder, vid.split(".")[0]))
-        real_masks = []
-        for file_name in masks:
-            if (
-                file_name.split(".")[0] == "mask_background"
-                and file_name.split(".")[-1] == "jpg"
-            ):
-                real_masks.append(file_name)
-        # print(real_masks)
-
-        if len(real_masks) == 0:
-            write_to_csv(
-                csv_path,
-                "background",
-                vid=vid.split(".")[0],
-                prompt=this_prompt,
-                object_1=object_1,
-                d_1=d_1,
-                object_2=object_2,
-                d_2=d_2,
-                mask_name="",
-                xy_json="",
-                change_in_x="",
-                change_in_y="",
-            )
-            continue
-        for mask_name in real_masks:
-            mask_path = osp.join(mask_folder, vid.split(".")[0], mask_name)
-            if any(
-                ["mask" in mode] for mode in args.visualization_modes
-            ) and osp.exists(mask_path):
-                mask = read_frame(mask_path, resolution=resolution)[0] > 0.5
-            else:
-                mask = torch.ones(args.height, args.width).bool()
-
-            data = {"video": video, "tracks": tracks, "mask": mask}
-
-            data = to_device(data, "cuda")
-
-            if data["tracks"].ndim == 4 and args.rainbow_mode == "left_right":
-                data["mask"] = data["mask"].permute(1, 0)
-                data["tracks"] = data["tracks"].permute(0, 2, 1, 3)
-            elif data["tracks"].ndim == 3:
-                points = data["tracks"][0]
-                x, y = points[..., 0].long(), points[..., 1].long()
-                x, y = x - x.min(), y - y.min()
-                if args.rainbow_mode == "left_right":
-                    idx = y + x * y.max()
-                else:
-                    idx = x + y * x.max()
-                order = idx.argsort(dim=0)
-                data["tracks"] = data["tracks"][:, order]
-
-            for mode in args.visualization_modes:
-                video, x_change_list, y_change_list = forward(
-                    data, mode=mode, args=args
-                )
-
-            # Find the last valid x and y changes (not -10000)
-            last_x = -10000
-            last_y = -10000
-            if len(x_change_list) > 0:
-                for cnt in range(len(x_change_list)):
-                    last_x = x_change_list[-(cnt + 1)]
-                    last_y = y_change_list[-(cnt + 1)]
-                    if (last_x == -10000 and last_y != -10000) or (
-                        last_y == -10000 and last_x != -10000
-                    ):
-                        print("NO WAY")
-                        break
-                    if last_x != -10000 or last_y != -10000:
-                        print("last? ", -(cnt + 1))
-                        break
-                change_in_x = last_x - x_change_list[0]
-                change_in_y = last_y - y_change_list[0]
-            else:
-                change_in_x = 0
-                change_in_y = 0
-
-            xy_json = {
-                "x_change_list": x_change_list,
-                "y_change_list": y_change_list,
-            }
-
-            save_path = osp.join(save_prefix, mask_name.split(".")[0] + ".mp4")
-            write_video(video, save_path)
-            write_to_csv(
-                csv_path,
-                "background",
-                vid=vid.split(".")[0],
-                prompt=this_prompt,
-                object_1=object_1,
-                d_1=d_1,
-                object_2=object_2,
-                d_2=d_2,
-                mask_name=mask_name,
-                xy_json=xy_json,
-                change_in_x=change_in_x,
-                change_in_y=change_in_y,
-            )
-
-        # Clean up GPU memory after each video
-        del video, tracks, data
-        torch.cuda.empty_cache()
+        process_single_video_background(
+            video_name=videos[i],
+            prompts=prompts,
+            video_folder=video_folder,
+            mask_folder=mask_folder,
+            output_dir=output_dir,
+            csv_path=csv_path,
+            model=model,
+            args=args,
+            resolution=resolution,
+        )
 
     background_csv = f"{output_path}/{args.t2v_model}_background.csv"
     return background_csv
@@ -802,171 +1037,23 @@ def foreground(args, model=None):
     videos.sort(key=lambda x: int(x.split(".")[0]))
 
     evaluated = max(line_count - 1, 0)
+    all_results = []
 
     for i in range(evaluated, len(videos)):
-        video_name = videos[i]
-        ind = int(video_name[0:4]) - 1
-        vid = video_name
-
-        this_prompt = prompts[ind]["prompt"]
-        object_1 = prompts[ind]["object_1"]  # A is on the left of B
-        object_2 = prompts[ind]["object_2"]
-        d_1 = prompts[ind]["d_1"]
-        d_2 = prompts[ind]["d_2"]
-        directions = ["left", "right", "up", "down", ""]
-        if d_1 not in directions[:4] or d_2 not in directions:
-            print(d_1, d_2, " direction not included!!!, index: ", vid)
+        result = process_single_video_foreground(
+            video_name=videos[i],
+            prompts=prompts,
+            video_folder=video_folder,
+            mask_folder=mask_folder,
+            output_dir=output_dir,
+            csv_path=csv_path,
+            model=model,
+            args=args,
+            resolution=resolution,
+        )
+        all_results.append(result)
+        if result.get("error") == "direction_not_included":
             break
-
-        masks = os.listdir(osp.join(mask_folder, vid.split(".")[0]))
-        real_masks = []
-        for file_name in masks:
-            # Safely check filename format to avoid IndexError
-            parts = file_name.split("_")
-            if (
-                file_name.split(".")[-1] == "jpg"
-                and len(parts) >= 2
-                and parts[1] == "foreground"
-            ):
-                real_masks.append(file_name)
-
-        print(real_masks)
-        if len(real_masks) == 0 or len(real_masks) == 1:
-            write_to_csv(
-                csv_path,
-                "foreground",
-                vid=vid.split(".")[0],
-                prompt=this_prompt,
-                object_1=object_1,
-                d_1=d_1,
-                object_2=object_2,
-                d_2=d_2,
-                mask_name="",
-                xy_json="",
-                change_in_x="",
-                change_in_y="",
-            )
-            if len(real_masks) == 0:
-                write_to_csv(
-                    csv_path,
-                    "foreground",
-                    vid=vid.split(".")[0],
-                    prompt=this_prompt,
-                    object_1=object_1,
-                    d_1=d_1,
-                    object_2=object_2,
-                    d_2=d_2,
-                    mask_name="",
-                    xy_json="",
-                    change_in_x="",
-                    change_in_y="",
-                )
-            continue
-
-        # Move video loading and tracks computation outside the mask loop
-        save_prefix = osp.join(output_dir, vid.split(".")[0])
-        os.makedirs(save_prefix, exist_ok=True)
-        args.result_path = save_prefix
-        tracks_path = osp.join(args.result_path, "tracks.pth")
-
-        video = read_video(osp.join(video_folder, vid), resolution=resolution).cuda()
-
-        if not osp.exists(tracks_path) or args.recompute_tracks:
-            with torch.no_grad():
-                pred = model(
-                    {"video": video[None]},
-                    mode=args.inference_mode,
-                    **vars(args),
-                )
-            tracks = pred["tracks"][0]
-            if args.save_tracks:
-                torch.save(tracks.cpu(), tracks_path)
-            # Clean up prediction to free memory
-            del pred
-        else:
-            tracks = torch.load(tracks_path)
-
-        for mask_name in real_masks:
-            mask_path = osp.join(mask_folder, vid.split(".")[0], mask_name)
-            if any(
-                ["mask" in mode] for mode in args.visualization_modes
-            ) and osp.exists(mask_path):
-                mask = read_frame(mask_path, resolution=resolution)[0] > 0.5
-            else:
-                mask = torch.ones(args.height, args.width).bool()
-
-            data = {"video": video.clone(), "tracks": tracks.clone(), "mask": mask}
-
-            data = to_device(data, "cuda")
-
-            if data["tracks"].ndim == 4 and args.rainbow_mode == "left_right":
-                data["mask"] = data["mask"].permute(1, 0)
-                data["tracks"] = data["tracks"].permute(0, 2, 1, 3)
-            elif data["tracks"].ndim == 3:
-                points = data["tracks"][0]
-                x, y = points[..., 0].long(), points[..., 1].long()
-                x, y = x - x.min(), y - y.min()
-                if args.rainbow_mode == "left_right":
-                    idx = y + x * y.max()
-                else:
-                    idx = x + y * x.max()
-                order = idx.argsort(dim=0)
-                data["tracks"] = data["tracks"][:, order]
-
-            for mode in args.visualization_modes:
-                output_video, x_change_list, y_change_list = forward(
-                    data, mode=mode, args=args
-                )
-
-            # Find the last valid x and y changes (not -10000)
-            last_x = -10000
-            last_y = -10000
-            if len(x_change_list) > 0:
-                for cnt in range(len(x_change_list)):
-                    last_x = x_change_list[-(cnt + 1)]
-                    last_y = y_change_list[-(cnt + 1)]
-                    if (last_x == -10000 and last_y != -10000) or (
-                        last_y == -10000 and last_x != -10000
-                    ):
-                        print("NO WAY")
-                        break
-                    if last_x != -10000 or last_y != -10000:
-                        print("last? ", -(cnt + 1))
-                        break
-                change_in_x = last_x - x_change_list[0]
-                change_in_y = last_y - y_change_list[0]
-            else:
-                change_in_x = 0
-                change_in_y = 0
-
-            xy_json = {
-                "x_change_list": x_change_list,
-                "y_change_list": y_change_list,
-            }
-
-            save_path = osp.join(save_prefix, mask_name.split(".")[0] + ".mp4")
-            write_video(output_video, save_path)
-            write_to_csv(
-                csv_path,
-                "foreground",
-                vid=vid.split(".")[0],
-                prompt=this_prompt,
-                object_1=object_1,
-                d_1=d_1,
-                object_2=object_2,
-                d_2=d_2,
-                mask_name=mask_name,
-                xy_json=xy_json,
-                change_in_x=change_in_x,
-                change_in_y=change_in_y,
-            )
-
-            # Clean up data after each mask
-            del data
-
-        # Clean up GPU memory after each video
-        del video, tracks
-        torch.cuda.empty_cache()
 
     foreground_csv = f"{output_path}/{args.t2v_model}_foreground.csv"
     return foreground_csv
@@ -997,8 +1084,3 @@ if __name__ == "__main__":
 
     # final model score printed out and recorded in the last line of score_csv
     model_score(score_csv)
-
-    print(foreground_csv)
-    print(background_csv)
-    print(score_csv)
-    print("Done.")

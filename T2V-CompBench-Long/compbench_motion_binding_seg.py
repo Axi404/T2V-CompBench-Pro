@@ -45,6 +45,258 @@ def load_model(model_config_path, model_checkpoint_path, device):
     return model
 
 
+def process_foreground_mask(
+    obj_prompt: str,
+    image_path: str,
+    image_pil,
+    image_loaded,
+    model: torch.nn.Module,
+    predictor: SamPredictor,
+    box_threshold: float,
+    text_threshold: float,
+    output_dir: str,
+    video_name: str,
+    device: str,
+) -> bool:
+    """
+    Process foreground mask for a single object.
+
+    Args:
+        obj_prompt: Object prompt for detection.
+        image_path: Path to the image file.
+        image_pil: PIL image object.
+        image_loaded: Loaded and processed image tensor.
+        model: Grounding model for object detection.
+        predictor: SAM predictor for segmentation.
+        box_threshold: Threshold for box detection.
+        text_threshold: Threshold for text matching.
+        output_dir: Directory to save output.
+        video_name: Name of the video being processed.
+        device: Device to run inference on.
+
+    Returns:
+        True if processing succeeded, False if no boxes detected.
+    """
+    boxes_filt, pred_phrases, probs = get_grounding_output(
+        model,
+        image_loaded,
+        obj_prompt,
+        box_threshold,
+        text_threshold,
+        device=device,
+    )
+    if boxes_filt.shape[0] == 0:
+        return False
+
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    predictor.set_image(image)
+    size = image_pil.size
+    H, W = size[1], size[0]
+    for i in range(boxes_filt.size(0)):
+        boxes_filt[i] = boxes_filt[i] * torch.Tensor([W, H, W, H])
+        boxes_filt[i][:2] -= boxes_filt[i][2:] / 2
+        boxes_filt[i][2:] += boxes_filt[i][:2]
+
+    boxes_filt = boxes_filt.cpu()
+    transformed_boxes = predictor.transform.apply_boxes_torch(
+        boxes_filt, image.shape[:2]
+    ).to(device)
+
+    masks, _, _ = predictor.predict_torch(
+        point_coords=None,
+        point_labels=None,
+        boxes=transformed_boxes.to(device),
+        multimask_output=False,
+    )
+
+    # draw output image
+    plt.figure(figsize=(10, 10))
+    plt.imshow(image)
+    for mask in masks:
+        show_mask(mask.cpu().numpy(), plt.gca(), random_color=False)
+    for box, label in zip(boxes_filt, pred_phrases):
+        show_box(box.numpy(), plt.gca(), label)
+    plt.axis("off")
+    plt.savefig(
+        os.path.join(output_dir, video_name, f"grounded_sam_output_{obj_prompt}.jpg"),
+        bbox_inches="tight",
+        dpi=300,
+        pad_inches=0.0,
+    )
+    plt.close()
+
+    m = max(probs)
+    ind = probs.index(m)
+    mask_max_prob = masks[ind]
+    save_mask_foreground(
+        os.path.join(output_dir, video_name), mask_max_prob, obj_prompt
+    )
+    return True
+
+
+def process_background_mask(
+    background_prompt: str,
+    image_path: str,
+    image_pil,
+    image_loaded,
+    model: torch.nn.Module,
+    predictor: SamPredictor,
+    box_threshold: float,
+    text_threshold: float,
+    output_dir: str,
+    video_name: str,
+    device: str,
+) -> bool:
+    """
+    Process background mask for the combined objects.
+
+    Args:
+        background_prompt: Combined prompt for background detection.
+        image_path: Path to the image file.
+        image_pil: PIL image object.
+        image_loaded: Loaded and processed image tensor.
+        model: Grounding model for object detection.
+        predictor: SAM predictor for segmentation.
+        box_threshold: Threshold for box detection.
+        text_threshold: Threshold for text matching.
+        output_dir: Directory to save output.
+        video_name: Name of the video being processed.
+        device: Device to run inference on.
+
+    Returns:
+        True if processing succeeded, False if no boxes detected.
+    """
+    boxes_filt, pred_phrases, probs = get_grounding_output(
+        model,
+        image_loaded,
+        background_prompt,
+        box_threshold,
+        text_threshold,
+        device=device,
+    )
+    if boxes_filt.shape[0] == 0:
+        return False
+
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    predictor.set_image(image)
+    size = image_pil.size
+    H, W = size[1], size[0]
+    for i in range(boxes_filt.size(0)):
+        boxes_filt[i] = boxes_filt[i] * torch.Tensor([W, H, W, H])
+        boxes_filt[i][:2] -= boxes_filt[i][2:] / 2
+        boxes_filt[i][2:] += boxes_filt[i][:2]
+
+    boxes_filt = boxes_filt.cpu()
+    transformed_boxes = predictor.transform.apply_boxes_torch(
+        boxes_filt, image.shape[:2]
+    ).to(device)
+
+    masks, _, _ = predictor.predict_torch(
+        point_coords=None,
+        point_labels=None,
+        boxes=transformed_boxes.to(device),
+        multimask_output=False,
+    )
+
+    # draw output image
+    plt.figure(figsize=(10, 10))
+    plt.imshow(image)
+    for mask in masks:
+        show_mask(mask.cpu().numpy(), plt.gca(), random_color=False)
+    for box, label in zip(boxes_filt, pred_phrases):
+        show_box(box.numpy(), plt.gca(), label)
+
+    plt.axis("off")
+    plt.savefig(
+        os.path.join(output_dir, video_name, "grounded_sam_output_background.jpg"),
+        bbox_inches="tight",
+        dpi=300,
+        pad_inches=0.0,
+    )
+    plt.close()
+
+    save_mask_data(
+        os.path.join(output_dir, video_name), masks, boxes_filt, pred_phrases
+    )  # save background
+    return True
+
+
+def process_single_video_segmentation(
+    video_name: str,
+    object_to_detect: list,
+    background_prompt: str,
+    frame_folder: str,
+    output_dir: str,
+    model: torch.nn.Module,
+    predictor: SamPredictor,
+    box_threshold: float,
+    text_threshold: float,
+    device: str,
+) -> bool:
+    """
+    Process a single video for motion binding segmentation.
+
+    Args:
+        video_name: Name of the video being processed.
+        object_to_detect: List of object prompts to detect.
+        background_prompt: Combined prompt for background detection.
+        frame_folder: Path to folder containing video frames.
+        output_dir: Directory to save output.
+        model: Grounding model for object detection.
+        predictor: SAM predictor for segmentation.
+        box_threshold: Threshold for box detection.
+        text_threshold: Threshold for text matching.
+        device: Device to run inference on.
+
+    Returns:
+        True if processing succeeded, False if background mask failed.
+    """
+    os.makedirs(os.path.join(output_dir, video_name), exist_ok=True)
+
+    image_name = video_name + "_000000.png"
+    image_path = os.path.join(frame_folder, video_name, image_name)
+
+    # load image
+    image_pil, image_loaded = load_and_process_image(image_path)
+
+    # mask_foreground
+    for obj_prompt in object_to_detect:
+        process_foreground_mask(
+            obj_prompt=obj_prompt,
+            image_path=image_path,
+            image_pil=image_pil,
+            image_loaded=image_loaded,
+            model=model,
+            predictor=predictor,
+            box_threshold=box_threshold,
+            text_threshold=text_threshold,
+            output_dir=output_dir,
+            video_name=video_name,
+            device=device,
+        )
+
+    # mask_background
+    success = process_background_mask(
+        background_prompt=background_prompt,
+        image_path=image_path,
+        image_pil=image_pil,
+        image_loaded=image_loaded,
+        model=model,
+        predictor=predictor,
+        box_threshold=box_threshold,
+        text_threshold=text_threshold,
+        output_dir=output_dir,
+        video_name=video_name,
+        device=device,
+    )
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    return success
+
+
 def foreground_background_mask(args):
     # cfg
     config_file = args.config  # change the path of the model config file
@@ -98,7 +350,7 @@ def foreground_background_mask(args):
         video_name = videos[k]
         num = int(video_name[0:4]) - 1
 
-        object_1 = prompts[num]["object_1"]  # A is on the left of B
+        object_1 = prompts[num]["object_1"]
         object_2 = prompts[num]["object_2"]
         d_1 = prompts[num]["d_1"]
         d_2 = prompts[num]["d_2"]
@@ -114,129 +366,18 @@ def foreground_background_mask(args):
             background_prompt = object_1
             object_to_detect = [object_1]
 
-        os.makedirs(os.path.join(output_dir, videos[k]), exist_ok=True)
-
-        image_name = videos[k] + "_000000.png"
-        image_path = os.path.join(frame_folder, videos[k], image_name)
-
-        # load image
-        image_pil, image_loded = load_and_process_image(image_path)
-
-        # mask_foreground
-        for obj_prompt in object_to_detect:
-            boxes_filt, pred_phrases, probs = get_grounding_output(
-                model,
-                image_loded,
-                obj_prompt,
-                box_threshold,
-                text_threshold,
-                device=device,
-            )
-            if boxes_filt.shape[0] == 0:
-                continue
-            image = cv2.imread(image_path)
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            predictor.set_image(image)
-            size = image_pil.size
-            H, W = size[1], size[0]
-            for i in range(boxes_filt.size(0)):
-                boxes_filt[i] = boxes_filt[i] * torch.Tensor([W, H, W, H])
-                boxes_filt[i][:2] -= boxes_filt[i][2:] / 2
-                boxes_filt[i][2:] += boxes_filt[i][:2]
-
-            boxes_filt = boxes_filt.cpu()
-            transformed_boxes = predictor.transform.apply_boxes_torch(
-                boxes_filt, image.shape[:2]
-            ).to(device)
-
-            masks, _, _ = predictor.predict_torch(
-                point_coords=None,
-                point_labels=None,
-                boxes=transformed_boxes.to(device),
-                multimask_output=False,
-            )
-
-            # draw output image
-            plt.figure(figsize=(10, 10))
-            plt.imshow(image)
-            for mask in masks:
-                show_mask(mask.cpu().numpy(), plt.gca(), random_color=False)
-            for box, label in zip(boxes_filt, pred_phrases):
-                show_box(box.numpy(), plt.gca(), label)
-            plt.axis("off")
-            plt.savefig(
-                os.path.join(
-                    output_dir, videos[k], f"grounded_sam_output_{obj_prompt}.jpg"
-                ),
-                bbox_inches="tight",
-                dpi=300,
-                pad_inches=0.0,
-            )
-            plt.close()
-
-            m = max(probs)
-            ind = probs.index(m)
-            mask_max_prob = masks[ind]
-            save_mask_foreground(
-                os.path.join(output_dir, videos[k]), mask_max_prob, obj_prompt
-            )
-
-        # mask_background
-        boxes_filt, pred_phrases, probs = get_grounding_output(
-            model,
-            image_loded,
-            background_prompt,
-            box_threshold,
-            text_threshold,
+        process_single_video_segmentation(
+            video_name=video_name,
+            object_to_detect=object_to_detect,
+            background_prompt=background_prompt,
+            frame_folder=frame_folder,
+            output_dir=output_dir,
+            model=model,
+            predictor=predictor,
+            box_threshold=box_threshold,
+            text_threshold=text_threshold,
             device=device,
         )
-        if boxes_filt.shape[0] == 0:
-            continue
-        image = cv2.imread(image_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        predictor.set_image(image)
-        size = image_pil.size
-        H, W = size[1], size[0]
-        for i in range(boxes_filt.size(0)):
-            boxes_filt[i] = boxes_filt[i] * torch.Tensor([W, H, W, H])
-            boxes_filt[i][:2] -= boxes_filt[i][2:] / 2
-            boxes_filt[i][2:] += boxes_filt[i][:2]
-
-        boxes_filt = boxes_filt.cpu()
-        transformed_boxes = predictor.transform.apply_boxes_torch(
-            boxes_filt, image.shape[:2]
-        ).to(device)
-
-        masks, _, _ = predictor.predict_torch(
-            point_coords=None,
-            point_labels=None,
-            boxes=transformed_boxes.to(device),
-            multimask_output=False,
-        )
-
-        # draw output image
-        plt.figure(figsize=(10, 10))
-        plt.imshow(image)
-        for mask in masks:
-            show_mask(mask.cpu().numpy(), plt.gca(), random_color=False)
-        for box, label in zip(boxes_filt, pred_phrases):
-            show_box(box.numpy(), plt.gca(), label)
-
-        plt.axis("off")
-        plt.savefig(
-            os.path.join(output_dir, videos[k], "grounded_sam_output_background.jpg"),
-            bbox_inches="tight",
-            dpi=300,
-            pad_inches=0.0,
-        )
-        plt.close()
-
-        save_mask_data(
-            os.path.join(output_dir, videos[k]), masks, boxes_filt, pred_phrases
-        )  # save background
-
-        gc.collect()
-        torch.cuda.empty_cache()
 
     print("standard video path: ", stardard_video_path)
 
