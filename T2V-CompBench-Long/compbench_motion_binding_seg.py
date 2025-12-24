@@ -394,7 +394,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--grounded_checkpoint",
         type=str,
-        default="GSA/GroundingDINO/weights/groundingdino_swint_ogc.pth",
+        default="GSA/groundingdino_swint_ogc.pth",
         help="path to checkpoint file",
     )
     parser.add_argument(

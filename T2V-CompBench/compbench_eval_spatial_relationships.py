@@ -396,7 +396,6 @@ def spatial_2d(args):
 
     frame_folder = args.frame_folder
     videos = os.listdir(frame_folder)
-    videos = [v for v in videos if not os.path.isdir(os.path.join(frame_folder, v))]
     videos.sort()  # sort
 
     csv_path, line_count = initialize_csv(args.output_path, args.t2v_model, "2dframe")
@@ -761,7 +760,6 @@ def spatial_3d(args):
 
     frame_folder = args.frame_folder
     videos = os.listdir(frame_folder)
-    videos = [v for v in videos if not os.path.isdir(os.path.join(frame_folder, v))]
     videos.sort()  # sort
 
     csv_path, line_count = initialize_csv(args.output_path, args.t2v_model, "3dframe")
