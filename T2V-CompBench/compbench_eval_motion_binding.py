@@ -426,10 +426,10 @@ def process_single_mask(
             if (last_x == -10000 and last_y != -10000) or (
                 last_y == -10000 and last_x != -10000
             ):
-                print("NO WAY")
+                # print("NO WAY")
                 break
             if last_x != -10000 or last_y != -10000:
-                print("last? ", -(cnt + 1))
+                # print("last? ", -(cnt + 1))
                 break
         change_in_x = last_x - x_change_list[0]
         change_in_y = last_y - y_change_list[0]
@@ -480,7 +480,7 @@ def process_single_video_background(
     model,
     args,
     resolution: tuple,
-) -> dict:
+) -> None:
     """
     Process a single video for background motion binding evaluation.
 
@@ -496,7 +496,7 @@ def process_single_video_background(
         resolution: Resolution tuple (height, width).
 
     Returns:
-        Dictionary containing score information for the video.
+        None
     """
     ind = int(video_name[0:4]) - 1
     vid = video_name
@@ -514,8 +514,8 @@ def process_single_video_background(
     d_2 = prompts[ind]["d_2"]
     directions = ["left", "right", "up", "down", ""]
     if d_1 not in directions[:4] or d_2 not in directions:
-        print(d_1, d_2, " direction not included!!!, index: ", vid)
-        return {"score": None, "error": "direction_not_included"}
+        # print(d_1, d_2, " direction not included!!!, index: ", vid)
+        return None
 
     video = read_video(osp.join(video_folder, vid), resolution=resolution).cuda()
 
@@ -577,6 +577,8 @@ def process_single_video_background(
     del video, tracks
     torch.cuda.empty_cache()
 
+    return None
+
 
 def process_single_video_foreground(
     video_name: str,
@@ -588,7 +590,7 @@ def process_single_video_foreground(
     model,
     args,
     resolution: tuple,
-) -> dict:
+) -> None:
     """
     Process a single video for foreground motion binding evaluation.
 
@@ -604,7 +606,7 @@ def process_single_video_foreground(
         resolution: Resolution tuple (height, width).
 
     Returns:
-        Dictionary containing score information for the video.
+        None
     """
     ind = int(video_name[0:4]) - 1
     vid = video_name
@@ -616,8 +618,8 @@ def process_single_video_foreground(
     d_2 = prompts[ind]["d_2"]
     directions = ["left", "right", "up", "down", ""]
     if d_1 not in directions[:4] or d_2 not in directions:
-        print(d_1, d_2, " direction not included!!!, index: ", vid)
-        return {"score": None, "error": "direction_not_included"}
+        # print(d_1, d_2, " direction not included!!!, index: ", vid)
+        return None
 
     masks = os.listdir(osp.join(mask_folder, vid.split(".")[0]))
     real_masks = []
@@ -706,7 +708,7 @@ def process_single_video_foreground(
     # Clean up GPU memory
     del video, tracks
     torch.cuda.empty_cache()
-
+    return
 
 def combine_fore_back(foreground, background, output_csv):
     back_x = []
@@ -1037,10 +1039,9 @@ def foreground(args, model=None):
     videos.sort(key=lambda x: int(x.split(".")[0]))
 
     evaluated = max(line_count - 1, 0)
-    all_results = []
 
     for i in range(evaluated, len(videos)):
-        result = process_single_video_foreground(
+        process_single_video_foreground(
             video_name=videos[i],
             prompts=prompts,
             video_folder=video_folder,
@@ -1051,9 +1052,6 @@ def foreground(args, model=None):
             args=args,
             resolution=resolution,
         )
-        all_results.append(result)
-        if result.get("error") == "direction_not_included":
-            break
 
     foreground_csv = f"{output_path}/{args.t2v_model}_foreground.csv"
     return foreground_csv

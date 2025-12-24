@@ -26,7 +26,7 @@ def create_folder(path, verbose=False, exist_ok=True, safe=True):
 
 
 def read_video(path, start_step=0, time_steps=None, channels="first", exts=("jpg", "png"), resolution=None):
-    if path.endswith(".mp4"):
+    if os.path.isfile(path):
         video = read_video_from_file(path, start_step, time_steps, channels, resolution)
     else:
         video = read_video_from_folder(path, start_step, time_steps, channels, resolution, exts)
