@@ -26,4 +26,4 @@ python T2V-CompBench/compbench_eval_spatial_relationships.py --video-path playgr
 python T2V-CompBench/compbench_motion_binding_seg.py  --video-path playground/model_output/${model_name}/motion_4 --t2v-model ${model_name}
 python T2V-CompBench/compbench_eval_motion_binding.py --video-path playground/model_output/${model_name}/motion_4 --t2v-model ${model_name}
 
-python T2V-CompBench/compbench_eval_get_result.py --model-name ${model_name}
+python T2V-CompBench/compbench_eval_get_result.py --t2v-model ${model_name}

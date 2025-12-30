@@ -4,6 +4,7 @@ import os
 import sys
 
 import torch
+from tqdm import tqdm
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -149,7 +150,7 @@ def eval_model(args):
     csv_path, line_count = initialize_csv(output_path, args.t2v_model, "numeracy_frame")
     evaluated = max(line_count - 1, 0)
 
-    for i in range(evaluated, len(videos)):
+    for i in tqdm(range(evaluated, len(videos)), desc="Numeracy Evaluation"):
         os.makedirs(os.path.join(output_dir, videos[i]), exist_ok=True)
         video_path = os.path.join(frame_folder, videos[i])
         images = os.listdir(video_path)
@@ -220,7 +221,7 @@ if __name__ == "__main__":
         "--checkpoint_path",
         "-p",
         type=str,
-        default="GSA/GroundingDINO/weights/groundingdino_swint_ogc.pth",
+        default="GSA/groundingdino_swint_ogc.pth",
         help="path to checkpoint file",
     )
     parser.add_argument(
