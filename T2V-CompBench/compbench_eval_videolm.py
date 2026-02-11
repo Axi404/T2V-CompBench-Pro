@@ -2,7 +2,7 @@
 """
 compbench_eval_videolm.py — Video-LLM evaluation for T2V-CompBench-Pro.
 
-Drop-in replacement for LLaVA-based MLLM evaluation scripts using Qwen-VL.
+Video-LLM evaluation scripts using Qwen-VL.
 Directly processes video input instead of converting to image grids.
 
 Covers all 4 MLLM categories:
@@ -11,12 +11,10 @@ Covers all 4 MLLM categories:
 Prerequisites:
   pip install "transformers>=4.57.0" accelerate
   pip install flash-attn --no-build-isolation   # optional, recommended
-  pip install "qwen-vl-utils[decord]"           # only needed for Qwen2.5-VL fallback
 
 Recommended models (single 80GB A800):
   Qwen/Qwen3-VL-32B-Instruct          (~66 GB, BF16, best quality)
   Qwen/Qwen3-VL-32B-Instruct-FP8      (~33 GB, FP8, near-lossless)
-  Qwen/Qwen2.5-VL-72B-Instruct-AWQ    (~38 GB, AWQ 4-bit)
   Qwen/Qwen3-VL-8B-Instruct           (~16 GB, budget option)
 
 Usage:
@@ -128,21 +126,15 @@ CATEGORY_CONFIG = {
 
 
 def load_model(model_path: str):
-    """Load a Qwen-VL model and its processor."""
-    from transformers import AutoProcessor
-
-    try:
-        from transformers import AutoModelForImageTextToText as ModelCls
-    except ImportError:
-        # Fallback for older transformers (Qwen2.5-VL only)
-        from transformers import Qwen2_5_VLForConditionalGeneration as ModelCls
+    """Load a Qwen3-VL model and its processor."""
+    from transformers import AutoModelForImageTextToText, AutoProcessor
 
     print(f"[INFO] Loading model: {model_path}")
     processor = AutoProcessor.from_pretrained(model_path)
 
     # Try flash_attention_2, fall back to sdpa if unavailable
     try:
-        model = ModelCls.from_pretrained(
+        model = AutoModelForImageTextToText.from_pretrained(
             model_path,
             torch_dtype="auto",
             attn_implementation="flash_attention_2",
@@ -150,27 +142,22 @@ def load_model(model_path: str):
         )
     except (ValueError, ImportError):
         print("[WARN] flash_attention_2 unavailable, using sdpa")
-        model = ModelCls.from_pretrained(
+        model = AutoModelForImageTextToText.from_pretrained(
             model_path,
             torch_dtype="auto",
             attn_implementation="sdpa",
             device_map="auto",
         )
 
-    print(f"[INFO] Model loaded. dtype={model.dtype}")
-    return model, processor
-
-
-_USE_QWEN3_PIPELINE: bool | None = None
-
-
-def _detect_pipeline(model) -> bool:
-    """Detect whether to use the Qwen3-VL native pipeline."""
     cls_name = type(model).__name__.lower()
     model_type = getattr(model.config, "model_type", "").lower()
-    is_qwen3 = "qwen3" in cls_name or "qwen3" in model_type
-    print(f"[INFO] Pipeline: {'Qwen3-VL native' if is_qwen3 else 'Qwen2.5-VL (qwen_vl_utils)'}")
-    return is_qwen3
+    if "qwen3" not in cls_name and "qwen3" not in model_type:
+        raise ValueError(
+            f"Only Qwen3-VL models are supported, got class={type(model).__name__}, model_type={model_type}"
+        )
+
+    print(f"[INFO] Model loaded. dtype={model.dtype}")
+    return model, processor
 
 
 def generate(
@@ -182,16 +169,7 @@ def generate(
     temperature: float = 0.1,
     top_p: float | None = None,
 ) -> str:
-    """Run a single generation step given a message history.
-
-    Auto-detects Qwen3-VL vs Qwen2.5-VL and uses the correct pipeline:
-      - Qwen3-VL:  processor.apply_chat_template(tokenize=True, return_dict=True)
-      - Qwen2.5-VL: two-step with qwen_vl_utils.process_vision_info
-    """
-    global _USE_QWEN3_PIPELINE
-    if _USE_QWEN3_PIPELINE is None:
-        _USE_QWEN3_PIPELINE = _detect_pipeline(model)
-
+    """Run a single generation step using the Qwen3-VL native pipeline."""
     do_sample = temperature > 0
     gen_kwargs = dict(max_new_tokens=max_new_tokens, do_sample=do_sample)
     if do_sample:
@@ -199,30 +177,13 @@ def generate(
         if top_p is not None:
             gen_kwargs["top_p"] = top_p
 
-    if _USE_QWEN3_PIPELINE:
-        # Qwen3-VL: processor handles vision processing internally
-        inputs = processor.apply_chat_template(
-            messages,
-            tokenize=True,
-            add_generation_prompt=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(model.device)
-    else:
-        # Qwen2.5-VL: two-step with qwen_vl_utils
-        from qwen_vl_utils import process_vision_info
-
-        text = processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        image_inputs, video_inputs = process_vision_info(messages)
-        inputs = processor(
-            text=[text],
-            images=image_inputs,
-            videos=video_inputs,
-            padding=True,
-            return_tensors="pt",
-        ).to(model.device)
+    inputs = processor.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_dict=True,
+        return_tensors="pt",
+    ).to(model.device)
 
     with torch.inference_mode():
         output_ids = model.generate(**inputs, **gen_kwargs)
@@ -923,7 +884,7 @@ def run_category(category: str, model, processor, args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Video-LLM evaluation for T2V-CompBench-Pro (replaces LLaVA)"
+        description="Video-LLM evaluation for T2V-CompBench-Pro"
     )
     parser.add_argument(
         "--category",

@@ -88,7 +88,7 @@ Three steps to evaluate a model:
 bash install.sh
 ```
 
-This creates the `t2v` conda environment, installs all dependencies (LLaVA, GroundingSAM, DOT), and downloads all required model weights (GroundingDINO, SAM, DOT checkpoints, LLaVA).
+This creates the `t2v` conda environment, installs dependencies (Qwen3-VL, GroundingSAM, DOT), and downloads required detection/tracking weights (GroundingDINO, SAM, DOT checkpoints). Qwen3-VL weights are downloaded automatically on first inference from HuggingFace.
 
 ### 2. Prepare Videos
 
@@ -139,7 +139,7 @@ All scripts are run from the **project root** directory. Activate the environmen
 conda activate t2v
 ```
 
-### MLLM-based Evaluation (LLaVA)
+### MLLM-based Evaluation (Qwen3-VL, frame-based)
 
 | Category | Command |
 |----------|---------|
@@ -148,7 +148,7 @@ conda activate t2v
 | Action Binding | `python T2V-CompBench/compbench_eval_action_binding.py --video-path playground/model_output/mymodel/action_5 --t2v-model mymodel` |
 | Interaction | `python T2V-CompBench/compbench_eval_interaction.py --video-path playground/model_output/mymodel/interaction_6 --t2v-model mymodel` |
 
-Optional: `--model-path` (default: `./weights/llava-v1.6-34b`), `--output-path`, `--read-prompt-file`
+Optional: `--model-path` (default: `Qwen/Qwen3-VL-32B-Instruct`), `--output-path`, `--read-prompt-file`
 
 ### Detection-based Evaluation (GroundingDINO + SAM + Depth Anything)
 
@@ -204,7 +204,7 @@ All weights are downloaded automatically by `install.sh`. For manual setup:
 | DOT estimator | `dot/checkpoints/cvo_raft_patch_8.pth` | motion_binding |
 | DOT refiner | `dot/checkpoints/movi_f_raft_patch_4_alpha.pth` | motion_binding |
 | DOT tracker | `dot/checkpoints/movi_f_cotracker2_patch_4_wind_8.pth` | motion_binding |
-| LLaVA v1.6-34b | `./weights/llava-v1.6-34b/` | consistent_attr, dynamic_attr, action, interaction |
+| Qwen3-VL-32B-Instruct | HF cache (`$HF_HOME` / `~/.cache/huggingface`) | consistent_attr, dynamic_attr, action, interaction |
 | Depth Anything | HF cache (`$HF_HOME`) | spatial (3D), auto-downloaded on first run |
 
 <a name="citation"></a>

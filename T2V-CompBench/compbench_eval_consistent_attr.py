@@ -3,7 +3,6 @@ import os
 import sys
 import csv
 import json
-import torch
 from tqdm import tqdm
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -11,17 +10,12 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from LLaVA.llava.model.builder import load_pretrained_model
-
-from utils.conversation_utils import conv_templates
-from utils.image_utils import load_images
-from utils.llava_utils import (
-    IMAGE_TOKEN_INDEX,
-    DEFAULT_IMAGE_TOKEN,
-    disable_torch_init,
-    get_model_name_from_path,
-    process_images,
-    tokenizer_image_token,
+from utils.qwen3_utils import (
+    assistant_message,
+    generate_with_messages,
+    image_message,
+    load_qwen3_model,
+    text_message,
 )
 from utils.prompt_utils import (
     CONSISTENT_ATTR_PROMPT_TEMPLATE_Q1 as Q1_template,
@@ -39,9 +33,8 @@ from utils.video_utils import convert_video_to_grid
 
 def run_consistent_attr_conversation(
     model,
-    tokenizer,
-    images_tensor: torch.Tensor,
-    image_sizes: list,
+    processor,
+    image_path: str,
     Q1: str,
     Q2: str,
     Q3: str,
@@ -52,10 +45,9 @@ def run_consistent_attr_conversation(
     Run a single iteration of the consistent attribute multi-turn conversation.
 
     Args:
-        model: The LLaVA model
-        tokenizer: The tokenizer
-        images_tensor: Processed image tensor
-        image_sizes: List of image sizes
+        model: The Qwen3-VL model
+        processor: The processor
+        image_path: Input image path
         Q1: First question prompt
         Q2: Second question prompt (for phrase_1)
         Q3: Third question prompt (for phrase_2)
@@ -65,78 +57,33 @@ def run_consistent_attr_conversation(
     Returns:
         tuple: (output_1, output_2, output_3, score_tmp)
     """
-    # conversation 1
-    conv = conv_templates["chatml_direct"].copy()
-    conv.append_message(conv.roles[0], Q1)
-    conv.append_message(conv.roles[1], None)
-    with torch.inference_mode():
-        output_ids = model.generate(
-            tokenizer_image_token(
-                conv.get_prompt(),
-                tokenizer,
-                IMAGE_TOKEN_INDEX,
-                return_tensors="pt",
-            )
-            .unsqueeze(0)
-            .cuda(),
-            images=images_tensor,
-            image_sizes=image_sizes,
-            do_sample=True if args.temperature > 0 else False,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            num_beams=args.num_beams,
-            max_new_tokens=args.max_new_tokens,
-            use_cache=True,
-        )
-    output_1 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-    conv.messages[-1][-1] = output_1
+    kw = dict(
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        num_beams=args.num_beams,
+    )
 
-    # conversation 2
-    conv.append_message(conv.roles[0], Q2)
-    conv.append_message(conv.roles[1], None)
-    with torch.inference_mode():
-        output_ids = model.generate(
-            tokenizer_image_token(
-                conv.get_prompt(),
-                tokenizer,
-                IMAGE_TOKEN_INDEX,
-                return_tensors="pt",
-            )
-            .unsqueeze(0)
-            .cuda(),
-            images=images_tensor,
-            image_sizes=image_sizes,
-            do_sample=True if args.temperature > 0 else False,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            num_beams=args.num_beams,
-            max_new_tokens=args.max_new_tokens,
-            use_cache=True,
-        )
-    output_2 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+    output_1 = generate_with_messages(
+        model,
+        processor,
+        [image_message(image_path, Q1)],
+        **kw,
+    )
 
-    # conversation 3
-    conv.messages[-2][-1] = Q3
-    with torch.inference_mode():
-        output_ids = model.generate(
-            tokenizer_image_token(
-                conv.get_prompt(),
-                tokenizer,
-                IMAGE_TOKEN_INDEX,
-                return_tensors="pt",
-            )
-            .unsqueeze(0)
-            .cuda(),
-            images=images_tensor,
-            image_sizes=image_sizes,
-            do_sample=True if args.temperature > 0 else False,
-            temperature=args.temperature,
-            top_p=args.top_p,
-            num_beams=args.num_beams,
-            max_new_tokens=args.max_new_tokens,
-            use_cache=True,
-        )
-    output_3 = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
+    output_2 = generate_with_messages(
+        model,
+        processor,
+        [image_message(image_path, Q1), assistant_message(output_1), text_message(Q2)],
+        **kw,
+    )
+
+    output_3 = generate_with_messages(
+        model,
+        processor,
+        [image_message(image_path, Q1), assistant_message(output_1), text_message(Q3)],
+        **kw,
+    )
 
     # parse model output
     try:
@@ -195,12 +142,10 @@ def eval_model(args):
         image_grid_path = convert_video_to_grid(video_path)
 
     # Model
-    disable_torch_init()
     print("Loading model...")
-    model_name = get_model_name_from_path(args.model_path)
-    tokenizer, model, image_processor, _ = load_pretrained_model(
-        args.model_path, args.model_base, model_name
-    )
+    if args.model_base is not None or args.conv_mode is not None or args.sep != ",":
+        print("[WARN] --model-base/--conv-mode/--sep are deprecated and ignored.")
+    model, processor = load_qwen3_model(args.model_path)
     print("Loading prompts...")
     with open(args.read_prompt_file, "r") as json_data:
         prompts = json.load(json_data)
@@ -227,14 +172,9 @@ def eval_model(args):
         phrase_1 = phrases.split(";")[0].strip()
         phrase_2 = phrases.split(";")[1].strip()
 
-        image_files = [os.path.join(image_grid_path, grid_images[i])]
-        images = load_images(image_files)
-        image_sizes = [x.size for x in images]
-        images_tensor = process_images(images, image_processor, model.config).to(
-            model.device, dtype=torch.float16
-        )
+        image_path = os.path.join(image_grid_path, grid_images[i])
 
-        Q1 = DEFAULT_IMAGE_TOKEN + "\n" + Q1_template
+        Q1 = Q1_template
         Q2 = Q2_template.format(phrase_1=phrase_1)
         Q3 = Q3_template.format(phrase_2=phrase_2)
 
@@ -249,9 +189,8 @@ def eval_model(args):
             # run multi-turn conversation
             output_1, output_2, output_3, score_tmp = run_consistent_attr_conversation(
                 model=model,
-                tokenizer=tokenizer,
-                images_tensor=images_tensor,
-                image_sizes=image_sizes,
+                processor=processor,
+                image_path=image_path,
                 Q1=Q1,
                 Q2=Q2,
                 Q3=Q3,
@@ -315,7 +254,9 @@ def model_score(csv_path):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-path", type=str, default="./weights/llava-v1.6-34b")
+    parser.add_argument(
+        "--model-path", type=str, default="Qwen/Qwen3-VL-32B-Instruct"
+    )
     parser.add_argument("--model-base", type=str, default=None)
     parser.add_argument("--conv-mode", type=str, default=None)
     parser.add_argument("--sep", type=str, default=",")
