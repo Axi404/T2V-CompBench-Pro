@@ -80,7 +80,7 @@ def image_message(image_path: str, text: str) -> dict:
     return {
         "role": "user",
         "content": [
-            {"type": "image", "image": f"file://{os.path.abspath(image_path)}"},
+            {"type": "image", "image": os.path.abspath(image_path)},
             {"type": "text", "text": text},
         ],
     }

@@ -207,7 +207,7 @@ def _video_msg(video_path: str, text: str, num_frames: int = 16):
         "content": [
             {
                 "type": "video",
-                "video": f"file://{os.path.abspath(video_path)}",
+                "video": os.path.abspath(video_path),
                 "nframes": num_frames,
             },
             {"type": "text", "text": text},
@@ -220,7 +220,7 @@ def _image_msg(image_path: str, text: str):
     return {
         "role": "user",
         "content": [
-            {"type": "image", "image": f"file://{os.path.abspath(image_path)}"},
+            {"type": "image", "image": os.path.abspath(image_path)},
             {"type": "text", "text": text},
         ],
     }
