@@ -5,8 +5,9 @@ echo "Model Name: ${model_name}"
 
 source ~/.zshrc
 
-export HF_HOME=/root/T2V-CompBench-Pro/weights
-export TRANSFORMERS_CACHE=/root/T2V-CompBench-Pro/weights
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export HF_HOME="${SCRIPT_DIR}/weights"
+export TRANSFORMERS_CACHE="${SCRIPT_DIR}/weights"
 export HF_ENDPOINT=https://hf-mirror.com
 
 conda activate t2v

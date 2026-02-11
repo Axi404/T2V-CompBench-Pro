@@ -19,18 +19,11 @@ This repository is the official implementation of the following paper:
 - [Evaluation Results](#evaluation_results)
 - [Leaderboard](#leaderboard)
 - [Prompt Suite](#prompt_suite)
-- [Installation](#installation)
+- [Quick Start](#quick_start)
 - [Prepare Evaluation Videos](#prepare_videos)
-- [MLLM-based Evaluation](#mllm_eval)
-  - [Consistent Attribute Binding](#consistent_attribute_binding)
-  - [Dynamic Attribute Binding](#dynamic_attribute_binding)
-  - [Action Binding](#action_binding)
-  - [Object Interactions](#object_interactions)
-- [Detection-based Evaluation](#detection_eval)
-  - [Spatial Relationships](#spatial_relationships)
-  - [Generative Numeracy](#generative_numeracy)
-- [Tracking-based Evaluation](#tracking_eval)
-  - [Motion Binding](#motion_binding)
+- [Run Individual Categories](#individual_eval)
+- [Score Aggregation](#score_aggregation)
+- [Weight File Reference](#weight_reference)
 - [Citation](#citation)
 
 <a name="updates"></a>
@@ -79,299 +72,140 @@ Put the CSV files in a folder and compress it, then submit the `.zip` to [T2V-Co
 
 <a name="prompt_suite"></a>
 ## :blue_book: T2V-CompBench Prompt Suite
-The T2V-CompBench prompt suite includes 1400 prompts covering 7 categories, each with 200 prompts. 
+The T2V-CompBench prompt suite includes 1400 prompts covering 7 categories, each with 200 prompts.
 
-For each category, the text prompts used to generate the videos are saved in a text file under the ```prompts/``` directory.
-The meta data used to assist the evaluation are saved in a json file under the ```meta_data/``` directory.
+For each category, the text prompts used to generate the videos are saved in a text file under the `playground/prompts/` directory.
+The metadata used to assist the evaluation are saved in a json file under the `playground/meta_data/` directory.
 
-<a name="installation"></a>
-## :hammer: Installation
+<a name="quick_start"></a>
+## :rocket: Quick Start
 
-MLLM-based evaluation metrics are based on the official repository of [LLaVA](https://github.com/KaiyueSun98/T2V-CompBench/tree/V2/LLaVA). 
-If you are evaluating **consistent attribute bindig, dynamic attribute binding, action binding and object interactions** with MLLM-based metrics, set the environment variable manually as follows:
-```
-conda create -n llava python==3.10.15
-conda activate llava
-cd LLaVA
-pip install --upgrade pip # enable PEP 660 support 
-pip install -e .
-pip install -e ".[train]"
-pip install flash-attn --no-build-isolation --no-cache-dir
+Three steps to evaluate a model:
+
+### 1. Install
+
+```bash
+bash install.sh
 ```
 
-Detection-based Evaluation metrics are based on the official repositories of [Depth Anything](https://github.com/KaiyueSun98/T2V-CompBench/tree/V2/Depth-Anything) and [GroundingSAM](https://github.com/KaiyueSun98/T2V-CompBench/tree/V2/Grounded-Segment-Anything). 
-Tracking-based Evaluation metric is based on the repositories of [GroundingSAM](https://github.com/KaiyueSun98/T2V-CompBench/tree/V2/Grounded-Segment-Anything) and [Dense Optical Tracking](https://github.com/KaiyueSun98/T2V-CompBench/tree/V2/dot). 
-If you are evaluating **spatial relationships, generative numeracy** with Detection-based metrics, or  **motion binding** with Tracking-based metrics:
-1. Set the environment variable manually as follows:
+This creates the `t2v` conda environment, installs all dependencies (LLaVA, GroundingSAM, DOT), and downloads all required model weights (GroundingDINO, SAM, DOT checkpoints, LLaVA).
+
+### 2. Prepare Videos
+
+Generate 200 videos per category using the prompts in `playground/prompts/`, then organize them as:
+
 ```
-export AM_I_DOCKER=False
-export BUILD_WITH_CUDA=True
-export CUDA_HOME=/path/to/cuda/
-conda create -n compbench python==3.12.3
-conda activate compbench
-cd Grounded-Segment-Anything
-python -m pip install -e segment_anything
-pip install -r requirements.txt
-cd ..
-```
-2. Download GroundingDINO checkpoints
-```
-mkdir Grounded-Segment-Anything/GroundingDINO/weights
-cd Grounded-Segment-Anything/GroundingDINO/weights
-wget -q https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth
-cd ../../..
-```
-3. Download SAM weights
-```
-cd Grounded-Segment-Anything
-# download the pretrained groundingdino-swin-tiny model
-wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth
-cd ..
+playground/model_output/{model_name}/
+├── consistent_attr_1/    # 0001.mp4 ~ 0200.mp4
+├── dynamic_attr_2/       # 0001.mp4 ~ 0200.mp4
+├── spatial_3/            # 0001.mp4 ~ 0200.mp4
+├── motion_4/             # 0001.mp4 ~ 0200.mp4
+├── action_5/             # 0001.mp4 ~ 0200.mp4
+├── interaction_6/        # 0001.mp4 ~ 0200.mp4
+└── numeracy_7/           # 0001.mp4 ~ 0200.mp4
 ```
 
-4. Download DOT checkpoints
+See [Prepare Evaluation Videos](#prepare_videos) for details.
+
+### 3. Run Evaluation
+
+```bash
+bash T2V-CompBench/eval_all.sh <model_name>
 ```
-cd dot
-wget -P checkpoints https://huggingface.co/16lemoing/dot/resolve/main/cvo_raft_patch_8.pth
-wget -P checkpoints https://huggingface.co/16lemoing/dot/resolve/main/movi_f_raft_patch_4_alpha.pth
-wget -P checkpoints https://huggingface.co/16lemoing/dot/resolve/main/movi_f_cotracker_patch_4_wind_8.pth
-wget -P checkpoints https://huggingface.co/16lemoing/dot/resolve/main/movi_f_cotracker2_patch_4_wind_8.pth
-wget -O checkpoints/movi_f_cotracker3_wind_60.pth https://huggingface.co/facebook/cotracker3/resolve/main/scaled_offline.pth
-wget -P checkpoints https://huggingface.co/16lemoing/dot/resolve/main/panning_movi_e_tapir.pth
-wget -P checkpoints https://huggingface.co/16lemoing/dot/resolve/main/panning_movi_e_plus_bootstapir.pth
-cd ..
-```
+
+This runs all 7 category evaluations and prints the final aggregated score. Results are written to `playground/results/csv_*/`.
+
 <a name="prepare_videos"></a>
 ## :clapper: Prepare Evaluation Videos
 
-Generate videos of your model using the T2V-CompBench prompts provided in the `prompts` directory. Organize them in the following structure for each category (using the *consistent attribute binding* category as an example):
+Generate 200 videos per category using the prompts in `playground/prompts/`. Videos must be named `0001.mp4` through `0200.mp4`, where each number corresponds to the line number in the prompt file (and the index in the metadata JSON).
 
-```
-../video/consistent_attr
-├── 0001.mp4
-├── 0002.mp4
-├── 0003.mp4
-├── 0004.mp4
-...
-└── 0200.mp4
-```
+- **Format**: MP4 (or any format supported by OpenCV `cv2.VideoCapture`)
+- **Naming**: `0001.mp4` ~ `0200.mp4` (4-digit zero-padded, 1-indexed)
+- **Count**: 200 per category, 1400 total
+- **Resolution/FPS**: No strict requirement; scripts extract frames automatically
 
+The evaluation scripts will automatically:
+- Convert videos to 3x2 image grids (6 frames) for MLLM-based evaluation
+- Convert videos to 16 individual frames for detection/tracking-based evaluation
+- Intermediate files are saved under the video directory (e.g., `frames/`, `image_grid/`)
 
-<a name="mllm_eval"></a>
-## :speech_balloon: MLLM-based Evaluation
+<a name="individual_eval"></a>
+## :wrench: Run Individual Categories
 
-### :running: Run the Evaluation Scripts
+All scripts are run from the **project root** directory. Activate the environment first:
 
-The following evaluation scripts have been placed in the `LLaVA/llava/eval` directory:
-
-- `compbench_eval_consistent_attr.py`
-- `compbench_eval_dynamic_attr.py`
-- `compbench_eval_action_binding.py`
-- `compbench_eval_interaction.py`
-
-Prepare the video repository path (*e.g.*, "../video/consistent_attr") in the argument `--video-path`. 
-Configure the folder to store the csv result files with the `--output-path` argument, configure the json file containing meta information with the `--read-prompt-file` argument. The evaluation codes will automatically convert the videos into the required formats (image grid or 16 frames) and then calculate the score.
-
-<a name="consistent_attribute_binding"></a>
-#### :tangerine: Consistent Attribute Binding
-
-Input the video path and run the command:
-
-```
-python llava/eval/compbench_eval_consistent_attr.py \
-  --video-path ../video/consistent_attr \
-  --output-path ../csv_consistent_attr \
-  --read-prompt-file ../meta_data/consistent_attribute_binding.json \
-  --t2v-model mymodel
+```bash
+conda activate t2v
 ```
 
-The conversations with the MLLM will be saved in a CSV file: `../csv_consistent_attr/mymodel_consistent_attr_score.csv`. The video name, prompt, and score for each text-video pair will be recorded in the columns named of "name","prompt", "Score". 
+### MLLM-based Evaluation (LLaVA)
 
-The final score of the model in this category (consistent attribute binding) will be printed in the last line of this CSV file.
+| Category | Command |
+|----------|---------|
+| Consistent Attribute | `python T2V-CompBench/compbench_eval_consistent_attr.py --video-path playground/model_output/mymodel/consistent_attr_1 --t2v-model mymodel` |
+| Dynamic Attribute | `python T2V-CompBench/compbench_eval_dynamic_attr.py --video-path playground/model_output/mymodel/dynamic_attr_2 --t2v-model mymodel` |
+| Action Binding | `python T2V-CompBench/compbench_eval_action_binding.py --video-path playground/model_output/mymodel/action_5 --t2v-model mymodel` |
+| Interaction | `python T2V-CompBench/compbench_eval_interaction.py --video-path playground/model_output/mymodel/interaction_6 --t2v-model mymodel` |
 
-<a name="dynamic_attribute_binding"></a>
-#### :lemon: Dynamic Attribute Binding
+Optional: `--model-path` (default: `./weights/llava-v1.6-34b`), `--output-path`, `--read-prompt-file`
 
-Input the video path and run the command:
+### Detection-based Evaluation (GroundingDINO + SAM + Depth Anything)
 
-```
-python llava/eval/compbench_eval_dynamic_attr.py \
-  --video-path ../video/dynamic_attr \
-  --output-path ../csv_dynamic_attr \
-  --read-prompt-file ../meta_data/dynamic_attribute_binding.json \
-  --t2v-model mymodel
-```
+| Category | Command |
+|----------|---------|
+| Spatial Relationships | `python T2V-CompBench/compbench_eval_spatial_relationships.py --video-path playground/model_output/mymodel/spatial_3 --t2v-model mymodel` |
+| Numeracy | `python T2V-CompBench/compbench_eval_numeracy.py --video-path playground/model_output/mymodel/numeracy_7 --t2v-model mymodel` |
 
-The conversations with the MLLM will be saved in a CSV file: `../csv_dynamic_attr/mymodel_dynamic_attr_score.csv`. The video name, prompt, and score for each text-video pair will be recorded in the columns named of "name","prompt", "Score". 
+### Tracking-based Evaluation (GroundingSAM + DOT)
 
-The final score of the model in this category (dynamic attribute binding) will be printed in the last line of this CSV file.
+Motion binding requires two steps run sequentially:
 
-<a name="action_binding"></a>
-#### :whale: Action Binding
+```bash
+# Step 1: Foreground/background segmentation
+python T2V-CompBench/compbench_motion_binding_seg.py \
+  --video-path playground/model_output/mymodel/motion_4 --t2v-model mymodel
 
-Input the video path and run the command:
-
-```
-python llava/eval/compbench_eval_action_binding.py \
-  --video-path ../video/action_binding \
-  --output-path ../csv_action_binding \
-  --read-prompt-file ../meta_data/action_binding.json \
-  --t2v-model mymodel
+# Step 2: Point tracking and motion scoring
+python T2V-CompBench/compbench_eval_motion_binding.py \
+  --video-path playground/model_output/mymodel/motion_4 --t2v-model mymodel
 ```
 
-The conversations with the MLLM will be saved in a CSV file: `../csv_action_binding/mymodel_action_binding_score.csv`. The video name, prompt, and score for each text-video pair will be recorded in the columns named of "name","prompt", "Score". 
+<a name="score_aggregation"></a>
+## :bar_chart: Score Aggregation
 
-The final score of the model in this category (action binding) will be printed in the last line of this CSV file.
+After all 7 categories are evaluated, compute the final normalized scores:
 
-<a name="object_interactions"></a>
-#### :crystal_ball: Object Interactions
-
-Input the video path and run the command:
-
-```
-python llava/eval/compbench_eval_interaction.py \
-  --video-path ../video/interaction \
-  --output-path ../csv_object_interactions \
-  --read-prompt-file ../meta_data/object_interactions.json \
-  --t2v-model mymodel
+```bash
+python T2V-CompBench/compbench_eval_get_result.py --t2v-model mymodel
 ```
 
-The conversations with the MLLM will be saved in a CSV file: `../csv_object_interactions/mymodel_object_interactions_score.csv`. The video name, prompt, and score for each text-video pair will be recorded in the columns named of "name","prompt", "Score". 
+Normalization:
+| Category | Formula |
+|----------|---------|
+| Consistent Attribute | `(score - 1) / 14` |
+| Action Binding | `(score - 1) / 9` |
+| Interaction | `(score - 1) / 9` |
+| Dynamic Attribute | raw score |
+| Numeracy | avg frame score per video |
+| Spatial | avg of 2D and 3D video scores |
+| Motion | negative scores clamped to 0, positive scaled by `0.8x + 0.2` |
+| **Final** | **average of all 7 normalized scores** |
 
-The final score of the model in this category (object interactions) will be printed in the last line of this CSV file.
+<a name="weight_reference"></a>
+## :package: Weight File Reference
 
-<a name="detection_eval"></a>
-## :mag_right: Detection-based Evaluation
-We use **GroundingDINO** as the detection tool to evaluate the two categories: 2D spatial relationships and generative numeracy.
+All weights are downloaded automatically by `install.sh`. For manual setup:
 
-We use **Depth Anything + GroundingSAM** to evaluate 3D spatial relationships ("in front of" & "behind").
-
-### :running: Run the Evaluation Scripts
-
-The following script used to obtain the segmentations for 3D-spatial relationship evaluation has been placed in the `Depth-Anything/` directory:
-
-- `compbench_run_depth.py`
-
-The following evaluation script for all spatial relationships has been placed in the `Grounded-Segment-Anything/` directory:
-
-- `comopbench_eval_spatial_relationships.py`
-
-The following evaluation script for numeracy has been placed in the `Grounded-Segment-Anything/GroundingDINO/demo` directory:
-
-- `compbench_eval_numeracy.py`
-
-<a name="spatial_relationships"></a>
-#### :cactus: Spatial Relationships
-
-Input the video path and run the command:
-
-```
-python Grounded-Segment-Anything/compbench_eval_spatial_relationships.py \
-  --video-path video/spatial_relationships \
-  --depth_folder output_spatial_depth \
-  --output-path csv_spatial \
-  --read-prompt-file meta_data/spatial_relationships.json \
-  --t2v-model mymodel \
-  --output_dir output_spatial
-```
-
-This script will firstly convert the videos into frames, which will be stored in the default directory: `video/frames/spatial_relationships/`, then it will obtain the depth images for 3D-spatial relationship evaluation and place them under the `../output_spatial_depth/mymodel` directory.
-Having these all prepared, it will start the evaluation.
-
-The output frame images showing the object bounding boxes for 2D spatial relationships and those showing the object bounding boxes toghther with segmentations for 3D spatial relationships will be stored in the `output_spatial/mymodel` directory.
-
-The frame scores will be saved in `csv_spatial/mymodel_2dframe.csv` and `csv_spatial/mymodel_3dframe.csv`.
-
-Frame scores will be combined to calculate the video scores, which will be saved in `csv_spatial/mymodel_2dvideo.csv` and `csv_spatial/mymodel_3dvideo.csv`.
-
-The score for each video of this category (spatial relationships), and the final result of the model will be saved in `csv_spatial/mymodel_spatial_score.csv`.
-
-
-<a name="generative_numeracy"></a>
-#### :apple: Generative Numeracy
-Input the video path and run the command:
-
-```
-python Grounded-Segment-Anything/GroundingDINO/demo/compbench_eval_numeracy.py \
-  --video-path video/generative_numeracy \
-  --output-path csv_numeracy \
-  --read-prompt-file meta_data/generative_numeracy.json \
-  --t2v-model mymodel \
-  --output_dir output_numeracy 
-
-```
-The output frame images showing the object bounding boxes will be stored in the `output_numeracy/mymodel` directory.
-
-The frame scores will be saved in `csv_numeracy/mymodel_numeracy_frame.csv`.
-
-They will be combined to calculate the video scores, which will be saved in `csv_numeracy/mymodel_numeracy_video.csv`.
-
-The final score of the model in this category (generative numeracy) will be printed in the last line of this CSV file.
-
-<a name="tracking_eval"></a>
-## :tractor: Tracking-based Evaluation
-We use **GroundingSAM + DOT** to evaluate motion binding.
-
-### :running: Run the Evaluation Scripts
-
-The following script used to obtain the segmentations of foreground objects has been placed in the `Grounded-Segment-Anything/` directory:
-
-- `compbench_motion_binding_seg.py`
-
-The following evaluation script for motion binding has been placed in the `dot/` directory:
-
-- `compbench_eavl_motion_binding.py`
-
-The config file for the evaluation script has been placed in the `dot/dot/utils/options/` directory:
-- `compbench_demo_options.py`
-
-<a name="motion_binding"></a>
-#### :white_circle: Motion Binding
-
-##### step 1: prepare the input images
-
-Configure the total number of video frames with the `--total_frame` argument, the video fps (frames per second) with the `--fps` argument. The script will convert the videos into the required formats.
-
-```
-python Grounded-Segment-Anything/compbench_motion_binding_seg.py \
-  --video-path video/motion_binding \
-  --read-prompt-file meta_data/motion_binding.json \
-  --t2v-model mymodel \
-  --total_frame 16 \
-  --fps 8 \
-  --output_dir output_motion_binding_seg
-```
-
-The downsampled video with fps≈8 will be stored in the default directory: `video/video_standard/motion_binding/`
-
-The background and forground segmentations of the 1st frame for videos in this category will be stored in the `output_motion_binding_seg/mymodel` directory.
-
-##### step 2: Track the foregroud and background points
-
-```
-cd dot
-python compbench_eval_motion_binding.py \
-  --video-path ../video/video_standard/motion_binding \
-  --mask_folder ../output_motion_binding_seg \
-  --read-prompt-file ../meta_data/motion_binding.json \
-  --t2v_model mymodel \
-  --output_path ../csv_motion_binding \
-  --output_dir ../output_motion_binding
-```
-
-The output videos showing the foreground and background point tracking will be stored in the `../output_motion_binding/mymodel` directory.
-
-The average movement of foreground points will be saved in `../csv_motion_binding/mymodel_foreground.csv`.
-
-The average movement of background points will be saved in `../csv_motion_binding/mymodel_background.csv`.
-
-They are combined to calculate the motion vector of the foreground object(s), which will be saved in `../csv_motion_binding/mymodel_motion_back_fore.csv`.
-
-The score for each video will be saved in `../csv_motion_binding/mymodel_motion_score.csv`
-
-The final score of the model for this category (motion) will be printed in the last line of `../csv_motion_binding/mymodel_score.csv`.
-
-
+| Weight | Expected Path | Used By |
+|--------|--------------|---------|
+| GroundingDINO SwinT | `GSA/groundingdino_swint_ogc.pth` | spatial, numeracy, motion_seg |
+| SAM ViT-H | `GSA/sam_vit_h_4b8939.pth` | spatial, motion_seg |
+| DOT estimator | `dot/checkpoints/cvo_raft_patch_8.pth` | motion_binding |
+| DOT refiner | `dot/checkpoints/movi_f_raft_patch_4_alpha.pth` | motion_binding |
+| DOT tracker | `dot/checkpoints/movi_f_cotracker2_patch_4_wind_8.pth` | motion_binding |
+| LLaVA v1.6-34b | `./weights/llava-v1.6-34b/` | consistent_attr, dynamic_attr, action, interaction |
+| Depth Anything | HF cache (`$HF_HOME`) | spatial (3D), auto-downloaded on first run |
 
 <a name="citation"></a>
 ## :black_nib: Citation
