@@ -34,3 +34,5 @@ cd ..
 # To pre-download:
 #   huggingface-cli download Qwen/Qwen3-VL-32B-Instruct --local-dir weights/Qwen3-VL-32B-Instruct
 mkdir -p weights
+
+huggingface-cli download Qwen/Qwen3-VL-32B-Instruct --local-dir weights/Qwen3-VL-32B-Instruct

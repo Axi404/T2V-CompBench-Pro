@@ -6,3 +6,5 @@ checkpoints/
 weights
 **/*.pyc
 **/*.pth
+
+CLAUDE.md
