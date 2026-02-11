@@ -36,3 +36,16 @@ cd ..
 # LLaVA model weights — eval scripts expect ./weights/llava-v1.6-34b
 mkdir -p weights
 huggingface-cli download liuhaotian/llava-v1.6-34b --local-dir weights/llava-v1.6-34b
+
+# ── Optional: Video-LLM backend (replaces LLaVA for MLLM categories) ──
+# Usage: bash install.sh --videolm
+if [[ "$1" == "--videolm" ]]; then
+    echo "Installing Video-LLM dependencies (Qwen-VL)..."
+    pip install "transformers>=4.57.0" accelerate
+    pip install flash-attn --no-build-isolation --no-cache-dir
+    pip install "qwen-vl-utils[decord]"  # only needed for Qwen2.5-VL fallback
+    # Default model: Qwen3-VL-32B-Instruct (~66GB BF16, fits on 80GB GPU)
+    # Weights are auto-downloaded on first run via HuggingFace.
+    # To pre-download:
+    #   huggingface-cli download Qwen/Qwen3-VL-32B-Instruct
+fi
