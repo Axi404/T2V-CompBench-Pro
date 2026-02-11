@@ -227,11 +227,11 @@ def _image_msg(image_path: str, text: str):
 
 
 def _text_msg(text: str):
-    return {"role": "user", "content": text}
+    return {"role": "user", "content": [{"type": "text", "text": text}]}
 
 
 def _asst(text: str):
-    return {"role": "assistant", "content": text}
+    return {"role": "assistant", "content": [{"type": "text", "text": text}]}
 
 
 # ═══════════════════════════════════════════════════════════════════════

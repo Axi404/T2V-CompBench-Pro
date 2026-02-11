@@ -2,6 +2,24 @@ import os
 import torch
 
 
+def _normalize_messages(messages: list) -> list:
+    normalized = []
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg = {**msg, "content": [{"type": "text", "text": content}]}
+        elif isinstance(content, list):
+            fixed = []
+            for item in content:
+                if isinstance(item, str):
+                    fixed.append({"type": "text", "text": item})
+                else:
+                    fixed.append(item)
+            msg = {**msg, "content": fixed}
+        normalized.append(msg)
+    return normalized
+
+
 def load_qwen3_model(model_path: str):
     """Load a Qwen3-VL model and its processor."""
     from transformers import AutoModelForImageTextToText, AutoProcessor
@@ -56,6 +74,7 @@ def generate_with_messages(
     if num_beams is not None:
         gen_kwargs["num_beams"] = num_beams
 
+    messages = _normalize_messages(messages)
     inputs = processor.apply_chat_template(
         messages,
         tokenize=True,
@@ -87,8 +106,8 @@ def image_message(image_path: str, text: str) -> dict:
 
 
 def text_message(text: str) -> dict:
-    return {"role": "user", "content": text}
+    return {"role": "user", "content": [{"type": "text", "text": text}]}
 
 
 def assistant_message(text: str) -> dict:
-    return {"role": "assistant", "content": text}
+    return {"role": "assistant", "content": [{"type": "text", "text": text}]}
