@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from torch import Tensor, nn
 from torchvision.ops.boxes import nms
+import inspect
 from transformers import BertConfig, BertModel, BertPreTrainedModel
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 
@@ -55,6 +56,28 @@ class BertModelWarper(nn.Module):
                     head_mask, num_hidden_layers, dtype
                 )
             )
+        self._extended_attention_mask_params = list(
+            inspect.signature(self.get_extended_attention_mask).parameters.keys()
+        )
+
+    def _get_extended_attention_mask_compat(self, attention_mask, input_shape, device):
+        """
+        Compatibility wrapper for transformers versions where
+        `get_extended_attention_mask` changed from `(attention_mask, input_shape, device)`
+        to `(attention_mask, input_shape, dtype=...)`.
+        """
+        params = self._extended_attention_mask_params
+        dtype = self.embeddings.word_embeddings.weight.dtype
+        if "device" in params:
+            return self.get_extended_attention_mask(
+                attention_mask, input_shape, device=device
+            )
+        if "dtype" in params:
+            return self.get_extended_attention_mask(
+                attention_mask, input_shape, dtype=dtype
+            )
+        # Very old fallback.
+        return self.get_extended_attention_mask(attention_mask, input_shape)
 
     def forward(
         self,
@@ -134,7 +157,7 @@ class BertModelWarper(nn.Module):
 
         # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
         # ourselves in which case we just need to make it broadcastable to all heads.
-        extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(
+        extended_attention_mask: torch.Tensor = self._get_extended_attention_mask_compat(
             attention_mask, input_shape, device
         )
 
